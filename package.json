@@ -1,0 +1,21 @@
+{
+  "name": "hackhilis",
+  "version": "1.0.0",
+  "description": "A cybersecurity-themed strategy game where players hack, learn, and build alliances",
+  "main": "index.js",
+  "scripts": {
+    "dev": "concurrently \"npm run server\" \"npm run client\"",
+    "client": "cd client && npm start",
+    "server": "cd server && npm run dev",
+    "build": "cd client && npm run build",
+    "install-all": "npm install && cd client && npm install && cd ../server && npm install"
+  },
+  "keywords": ["cybersecurity", "game", "hacking", "strategy", "multiplayer"],
+  "author": "HackHilis Team",
+  "license": "MIT",
+  "devDependencies": {
+    "concurrently": "^8.2.2"
+  }
+}
+
+
