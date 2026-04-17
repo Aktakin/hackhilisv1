@@ -3,10 +3,19 @@ const cors = require('cors');
 const mongoose = require('mongoose');
 const helmet = require('helmet');
 const rateLimit = require('express-rate-limit');
+const http = require('http');
+const { Server } = require('socket.io');
 require('dotenv').config();
 
 const app = express();
 const PORT = process.env.PORT || 5000;
+const server = http.createServer(app);
+const io = new Server(server, {
+  cors: {
+    origin: '*',
+    methods: ['GET', 'POST']
+  }
+});
 
 // Middleware
 app.use(helmet());
@@ -107,6 +116,289 @@ const allianceSchema = new mongoose.Schema({
 });
 
 const Alliance = mongoose.model('Alliance', allianceSchema);
+
+// Multiplayer simulation state (server-authoritative, in-memory)
+const PUBLIC_NETWORK_ID = 'public-network';
+const playerSessions = new Map(); // socketId => player session
+const usernameToSocketId = new Map(); // username => socketId
+const multiplayerRooms = new Map(); // roomId => { id, name, type, members:Set<socketId> }
+const attackCooldownByUser = new Map(); // username => last attack timestamp
+const SIMULATED_ID_REGEX = /^SIM-\d{3}\.\d{3}\.\d{3}-(USR|PHN|LTP|TAB|TV|RTR|DEV)$/;
+
+const clamp = (value, min, max) => Math.min(max, Math.max(min, value));
+
+const toSimulatedUserId = (username) => {
+  if (!username || typeof username !== 'string') {
+    return 'SIM-000.000.000-USR';
+  }
+  let hash = 0;
+  for (let i = 0; i < username.length; i += 1) {
+    const char = username.charCodeAt(i);
+    hash = ((hash << 5) - hash) + char;
+    hash |= 0;
+  }
+  const uniqueID = Math.abs(hash) % 254 + 1;
+  const subnet = Math.abs(hash >> 8) % 254 + 1;
+  const segment = Math.abs(hash >> 16) % 254 + 1;
+  const octet = (num) => String(num).padStart(3, '0');
+  return `SIM-${octet(segment)}.${octet(subnet)}.${octet(uniqueID)}-USR`;
+};
+
+const getOrCreateRoom = (roomId, roomConfig = {}) => {
+  if (!multiplayerRooms.has(roomId)) {
+    multiplayerRooms.set(roomId, {
+      id: roomId,
+      name: roomConfig.name || roomId,
+      type: roomConfig.type || 'private',
+      members: new Set()
+    });
+  }
+  return multiplayerRooms.get(roomId);
+};
+
+const leaveCurrentRoom = (socket, player) => {
+  if (!player?.roomId) return;
+  const previousRoomId = player.roomId;
+  const currentRoom = multiplayerRooms.get(player.roomId);
+  if (currentRoom) {
+    currentRoom.members.delete(socket.id);
+    socket.leave(currentRoom.id);
+    if (currentRoom.type !== 'public' && currentRoom.members.size === 0) {
+      multiplayerRooms.delete(currentRoom.id);
+    }
+  }
+  player.roomId = null;
+  if (multiplayerRooms.has(previousRoomId)) {
+    emitRoomPresence(previousRoomId);
+  }
+};
+
+const roomPresence = (roomId) => {
+  const room = multiplayerRooms.get(roomId);
+  if (!room) return [];
+  return [...room.members]
+    .map((socketId) => playerSessions.get(socketId))
+    .filter(Boolean)
+    .map((player) => ({
+      username: player.username,
+      simulatedId: player.simulatedId,
+      hackingSkill: player.hackingSkill,
+      defenseLevel: player.defenseLevel,
+      reputation: player.reputation,
+      status: 'online',
+      onlineSince: player.onlineSince,
+      roomId: player.roomId
+    }));
+};
+
+const emitRoomPresence = (roomId) => {
+  io.to(roomId).emit('multiplayer:presence', {
+    roomId,
+    players: roomPresence(roomId),
+    timestamp: Date.now()
+  });
+};
+
+const joinRoom = (socket, player, roomId, roomConfig = {}) => {
+  leaveCurrentRoom(socket, player);
+  const room = getOrCreateRoom(roomId, roomConfig);
+  room.members.add(socket.id);
+  player.roomId = room.id;
+  socket.join(room.id);
+  socket.emit('multiplayer:room_joined', {
+    roomId: room.id,
+    roomName: room.name,
+    roomType: room.type,
+    memberCount: room.members.size
+  });
+  emitRoomPresence(room.id);
+};
+
+const createRoomCode = () => {
+  const alphabet = 'ABCDEFGHJKLMNPQRSTUVWXYZ23456789';
+  let code = '';
+  for (let i = 0; i < 6; i += 1) {
+    code += alphabet[Math.floor(Math.random() * alphabet.length)];
+  }
+  return code;
+};
+
+getOrCreateRoom(PUBLIC_NETWORK_ID, { name: 'Public Network', type: 'public' });
+
+io.on('connection', (socket) => {
+  socket.on('multiplayer:register', (payload = {}) => {
+    const username = String(payload.username || '').trim();
+    if (!username) {
+      socket.emit('multiplayer:error', { message: 'Username is required for multiplayer registration.' });
+      return;
+    }
+
+    const existingSocketId = usernameToSocketId.get(username);
+    if (existingSocketId && existingSocketId !== socket.id) {
+      const existingSocket = io.sockets.sockets.get(existingSocketId);
+      if (existingSocket) {
+        existingSocket.emit('multiplayer:notice', { message: 'You connected from another session.' });
+        existingSocket.disconnect(true);
+      }
+    }
+
+    const player = {
+      username,
+      simulatedId: SIMULATED_ID_REGEX.test(payload.simulatedId || '')
+        ? payload.simulatedId
+        : toSimulatedUserId(username),
+      hackingSkill: clamp(Number(payload.hackingSkill) || 1, 1, 100),
+      defenseLevel: clamp(Number(payload.defenseLevel) || 1, 1, 10),
+      reputation: Number(payload.reputation) || 0,
+      onlineSince: Date.now(),
+      roomId: null
+    };
+
+    playerSessions.set(socket.id, player);
+    usernameToSocketId.set(username, socket.id);
+    socket.emit('multiplayer:registered', {
+      username: player.username,
+      simulatedId: player.simulatedId
+    });
+    joinRoom(socket, player, PUBLIC_NETWORK_ID, { name: 'Public Network', type: 'public' });
+  });
+
+  socket.on('multiplayer:update_profile', (payload = {}) => {
+    const player = playerSessions.get(socket.id);
+    if (!player) return;
+    player.hackingSkill = clamp(Number(payload.hackingSkill) || player.hackingSkill, 1, 100);
+    player.defenseLevel = clamp(Number(payload.defenseLevel) || player.defenseLevel, 1, 10);
+    player.reputation = Number(payload.reputation) || player.reputation;
+    if (SIMULATED_ID_REGEX.test(payload.simulatedId || '')) {
+      player.simulatedId = payload.simulatedId;
+    }
+    if (player.roomId) {
+      emitRoomPresence(player.roomId);
+    }
+  });
+
+  socket.on('multiplayer:join_public', () => {
+    const player = playerSessions.get(socket.id);
+    if (!player) return;
+    joinRoom(socket, player, PUBLIC_NETWORK_ID, { name: 'Public Network', type: 'public' });
+  });
+
+  socket.on('multiplayer:create_room', (payload = {}) => {
+    const player = playerSessions.get(socket.id);
+    if (!player) {
+      socket.emit('multiplayer:error', { message: 'Register before creating a room.' });
+      return;
+    }
+    let roomCode = String(payload.roomCode || '').trim().toUpperCase();
+    if (!roomCode) {
+      roomCode = createRoomCode();
+    }
+    while (multiplayerRooms.has(roomCode)) {
+      roomCode = createRoomCode();
+    }
+    joinRoom(socket, player, roomCode, {
+      name: payload.roomName || `Private Room ${roomCode}`,
+      type: 'private'
+    });
+    socket.emit('multiplayer:room_created', { roomCode });
+  });
+
+  socket.on('multiplayer:join_room', (payload = {}) => {
+    const player = playerSessions.get(socket.id);
+    if (!player) {
+      socket.emit('multiplayer:error', { message: 'Register before joining a room.' });
+      return;
+    }
+    const roomCode = String(payload.roomCode || '').trim().toUpperCase();
+    if (!roomCode || !multiplayerRooms.has(roomCode)) {
+      socket.emit('multiplayer:error', { message: 'Room not found. Check room code and try again.' });
+      return;
+    }
+    const targetRoom = multiplayerRooms.get(roomCode);
+    joinRoom(socket, player, targetRoom.id, { name: targetRoom.name, type: targetRoom.type });
+  });
+
+  socket.on('multiplayer:attack_attempt', (payload = {}) => {
+    const attacker = playerSessions.get(socket.id);
+    if (!attacker || !attacker.roomId) {
+      socket.emit('multiplayer:error', { message: 'Join a multiplayer network before attacking.' });
+      return;
+    }
+
+    const cooldownMs = 4000;
+    const now = Date.now();
+    const lastAttackAt = attackCooldownByUser.get(attacker.username) || 0;
+    if (now - lastAttackAt < cooldownMs) {
+      socket.emit('multiplayer:error', {
+        message: `Attack cooldown active. Wait ${Math.ceil((cooldownMs - (now - lastAttackAt)) / 1000)}s.`
+      });
+      return;
+    }
+
+    const targetUsername = String(payload.targetUsername || '').trim();
+    if (!targetUsername || targetUsername === attacker.username) {
+      socket.emit('multiplayer:error', { message: 'Select a valid online target.' });
+      return;
+    }
+
+    const targetSocketId = usernameToSocketId.get(targetUsername);
+    const targetPlayer = targetSocketId ? playerSessions.get(targetSocketId) : null;
+    if (!targetPlayer || targetPlayer.roomId !== attacker.roomId) {
+      socket.emit('multiplayer:error', { message: 'Target is not available in your current network.' });
+      return;
+    }
+
+    const toolBonusByType = {
+      recon: 0.03,
+      bruteforce: 0.08,
+      malware: 0.1
+    };
+    const rawTool = String(payload.tool || 'recon').toLowerCase();
+    const tool = rawTool === 'phishing' ? 'recon' : rawTool;
+    const toolBonus = toolBonusByType[tool] ?? 0.02;
+
+    const skillDelta = (attacker.hackingSkill - (targetPlayer.defenseLevel * 10)) / 100;
+    const breachChance = clamp(0.35 + skillDelta + toolBonus, 0.1, 0.92);
+    const success = Math.random() < breachChance;
+    const severity = success ? (Math.random() < 0.33 ? 'high' : 'medium') : 'blocked';
+
+    if (success) {
+      targetPlayer.defenseLevel = clamp(targetPlayer.defenseLevel - 1, 1, 10);
+      attacker.reputation += 2;
+    } else {
+      targetPlayer.defenseLevel = clamp(targetPlayer.defenseLevel + 1, 1, 10);
+    }
+    attackCooldownByUser.set(attacker.username, now);
+
+    const result = {
+      attacker: attacker.username,
+      attackerId: attacker.simulatedId,
+      target: targetPlayer.username,
+      targetId: targetPlayer.simulatedId,
+      tool,
+      success,
+      severity,
+      breachChance: Number(breachChance.toFixed(3)),
+      timestamp: now,
+      summary: success
+        ? `${attacker.username} breached ${targetPlayer.username} using ${tool}.`
+        : `${targetPlayer.username} blocked ${attacker.username}'s ${tool} attack.`
+    };
+
+    socket.emit('multiplayer:attack_result', result);
+    io.to(targetSocketId).emit('multiplayer:attack_alert', result);
+    io.to(attacker.roomId).emit('multiplayer:activity', result);
+    emitRoomPresence(attacker.roomId);
+  });
+
+  socket.on('disconnect', () => {
+    const player = playerSessions.get(socket.id);
+    if (!player) return;
+    usernameToSocketId.delete(player.username);
+    leaveCurrentRoom(socket, player);
+    playerSessions.delete(socket.id);
+  });
+});
 
 // Routes
 app.get('/api/health', (req, res) => {
@@ -279,7 +571,7 @@ app.use('*', (req, res) => {
   res.status(404).json({ error: 'Route not found' });
 });
 
-app.listen(PORT, () => {
+server.listen(PORT, () => {
   console.log(`HackHilis server running on port ${PORT}`);
 });
 

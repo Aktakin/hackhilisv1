@@ -18,6 +18,7 @@ import ScenarioManager from './components/ScenarioManager';
 import AttackScenario from './components/AttackScenario';
 import AttackTutorial from './components/AttackTutorial';
 import Missions from './components/Missions';
+import MissionDetail from './components/MissionDetail';
 import { GameProvider } from './context/GameContext';
 
 const GlobalStyle = createGlobalStyle`
@@ -77,25 +78,31 @@ const theme = {
   }
 };
 
+function readStoredSession() {
+  try {
+    const savedUser = localStorage.getItem('hackhilis_user');
+    if (!savedUser) {
+      return { user: null, isLoggedIn: false };
+    }
+    const userData = JSON.parse(savedUser);
+    return { user: userData, isLoggedIn: true };
+  } catch (error) {
+    console.error('Error parsing saved user:', error);
+    localStorage.removeItem('hackhilis_user');
+    return { user: null, isLoggedIn: false };
+  }
+}
+
 function App() {
-  const [isLoggedIn, setIsLoggedIn] = useState(false);
-  const [user, setUser] = useState(null);
+  const session = readStoredSession();
+  const [isLoggedIn, setIsLoggedIn] = useState(session.isLoggedIn);
+  const [user, setUser] = useState(session.user);
 
   useEffect(() => {
-    // Check if user is already logged in from localStorage
-    const savedUser = localStorage.getItem('hackhilis_user');
-    if (savedUser) {
-      try {
-        const userData = JSON.parse(savedUser);
-        setUser(userData);
-        setIsLoggedIn(true);
-        console.log('App - Restored user from localStorage:', userData.username);
-      } catch (error) {
-        console.error('Error parsing saved user:', error);
-        localStorage.removeItem('hackhilis_user');
-      }
-    } else {
+    if (!session.isLoggedIn) {
       console.log('App - No saved user found, starting fresh');
+    } else {
+      console.log('App - Session restored from localStorage:', session.user?.username);
     }
   }, []);
 
@@ -239,6 +246,14 @@ function App() {
                   element={
                     isLoggedIn ? 
                     <AttackTutorial /> : 
+                    <Navigate to="/login" replace />
+                  } 
+                />
+                <Route 
+                  path="/missions/:missionId" 
+                  element={
+                    isLoggedIn ? 
+                    <MissionDetail /> : 
                     <Navigate to="/login" replace />
                   } 
                 />

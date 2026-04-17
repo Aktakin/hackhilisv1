@@ -1,6 +1,7 @@
 import React, { useState, useEffect } from 'react';
 import styled, { keyframes } from 'styled-components';
 import { motion, AnimatePresence } from 'framer-motion';
+import { useUrlSearchParams } from '../hooks/useUrlSearchParams';
 import { useGame } from '../context/GameContext';
 import AndroidDevTerminal from './AndroidDevTerminal';
 import LaptopInterface from './LaptopInterface';
@@ -51,95 +52,182 @@ const shimmer = keyframes`
 `;
 
 const PhoneContainer = styled.div`
+  --dw-bg: #06080d;
+  --dw-surface: rgba(22, 27, 34, 0.78);
+  --dw-surface-hover: rgba(30, 36, 45, 0.92);
+  --dw-border: rgba(240, 246, 252, 0.08);
+  --dw-accent: #3ded97;
+  --dw-accent-soft: rgba(61, 237, 151, 0.14);
+  --dw-text: #e6edf3;
+  --dw-muted: #8b949e;
+
   display: flex;
   justify-content: center;
   align-items: flex-start;
   min-height: 100vh;
-  background: 
-    radial-gradient(circle at 20% 50%, rgba(0, 255, 65, 0.1) 0%, transparent 50%),
-    radial-gradient(circle at 80% 80%, rgba(0, 255, 255, 0.1) 0%, transparent 50%),
-    linear-gradient(135deg, #0a0a0a 0%, #1a1a2e 50%, #16213e 100%);
-  padding: 30px;
-  gap: 40px;
-  flex-wrap: wrap;
+  padding: 32px 20px 48px;
   position: relative;
-  
+  color: var(--dw-text);
+  background:
+    radial-gradient(ellipse 120% 80% at 50% -30%, rgba(61, 237, 151, 0.07), transparent 55%),
+    radial-gradient(ellipse 60% 40% at 100% 50%, rgba(56, 139, 253, 0.06), transparent 50%),
+    linear-gradient(165deg, #06080d 0%, #0d1117 45%, #0a0c12 100%);
+
   &::before {
     content: '';
     position: fixed;
-    top: 0;
-    left: 0;
-    right: 0;
-    bottom: 0;
-    background: 
-      linear-gradient(90deg, rgba(0, 255, 65, 0.02) 1px, transparent 1px),
-      linear-gradient(rgba(0, 255, 65, 0.02) 1px, transparent 1px);
-    background-size: 50px 50px;
+    inset: 0;
+    background-image:
+      linear-gradient(rgba(240, 246, 252, 0.03) 1px, transparent 1px),
+      linear-gradient(90deg, rgba(240, 246, 252, 0.03) 1px, transparent 1px);
+    background-size: 56px 56px;
+    mask-image: radial-gradient(ellipse 90% 70% at 50% 40%, black 20%, transparent 75%);
     pointer-events: none;
     z-index: 0;
   }
-  
-  @media (max-width: 1200px) {
-    flex-direction: column;
+
+  &::after {
+    content: '';
+    position: fixed;
+    inset: 0;
+    background: radial-gradient(circle at 20% 80%, rgba(61, 237, 151, 0.04), transparent 45%);
+    pointer-events: none;
+    z-index: 0;
   }
+
+  @media (max-width: 1200px) {
+    padding: 24px 16px 40px;
+  }
+`;
+
+const WorkspaceInner = styled.div`
+  position: relative;
+  z-index: 1;
+  width: 100%;
+  max-width: 1420px;
+  margin: 0 auto;
+  display: flex;
+  flex-direction: column;
+  gap: 28px;
+`;
+
+const WorkspaceHeader = styled.header`
+  padding-bottom: 22px;
+  border-bottom: 1px solid var(--dw-border);
+`;
+
+const WorkspaceEyebrow = styled.div`
+  font-size: 0.65rem;
+  font-weight: 600;
+  letter-spacing: 0.28em;
+  text-transform: uppercase;
+  color: var(--dw-muted);
+  margin-bottom: 10px;
+  font-family: 'Orbitron', sans-serif;
+`;
+
+const WorkspaceTitle = styled.h1`
+  font-family: 'Orbitron', sans-serif;
+  font-size: clamp(1.45rem, 2.8vw, 1.9rem);
+  font-weight: 600;
+  color: #f0f6fc;
+  margin: 0 0 10px;
+  letter-spacing: 0.03em;
+`;
+
+const WorkspaceSubtitle = styled.p`
+  margin: 0;
+  max-width: 52ch;
+  font-size: 0.94rem;
+  line-height: 1.6;
+  color: var(--dw-muted);
+`;
+
+const WorkspaceMain = styled.div`
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  gap: 32px;
+  width: 100%;
 `;
 
 const PhoneWrapper = styled.div`
   display: flex;
   flex-direction: column;
   align-items: center;
-  gap: 20px;
+  gap: 24px;
+  width: 100%;
 `;
 
-const DeviceSelection = styled.div`
+const DeviceDock = styled.nav`
   display: flex;
-  flex-direction: column;
-  gap: 15px;
-  margin-top: 20px;
-  align-items: center;
+  flex-wrap: wrap;
+  justify-content: center;
+  align-items: stretch;
+  gap: 10px;
+  padding: 12px 14px;
+  background: var(--dw-surface);
+  backdrop-filter: blur(20px) saturate(1.25);
+  border: 1px solid var(--dw-border);
+  border-radius: 16px;
+  box-shadow:
+    0 8px 32px rgba(0, 0, 0, 0.45),
+    inset 0 1px 0 rgba(255, 255, 255, 0.04);
+
+  @media (min-width: 900px) {
+    justify-content: flex-start;
+    padding: 14px 18px;
+    gap: 12px;
+  }
 `;
 
 const DeviceButton = styled(motion.button)`
-  width: 80px;
-  height: 80px;
-  background: linear-gradient(135deg, 
-    ${props => props.$active ? 'rgba(0, 255, 65, 0.2)' : 'rgba(0, 0, 0, 0.6)'} 0%, 
-    ${props => props.$active ? 'rgba(0, 255, 255, 0.2)' : 'rgba(0, 0, 0, 0.4)'} 100%);
-  backdrop-filter: blur(10px);
-  border: 2px solid ${props => props.$active ? 'rgba(0, 255, 65, 0.6)' : 'rgba(0, 255, 65, 0.3)'};
-  border-radius: 15px;
+  min-width: 108px;
+  padding: 14px 16px;
+  background: ${(props) =>
+    props.$active
+      ? 'linear-gradient(145deg, var(--dw-accent-soft) 0%, rgba(22, 27, 34, 0.5) 100%)'
+      : 'transparent'};
+  border: 1px solid
+    ${(props) => (props.$active ? 'rgba(61, 237, 151, 0.45)' : 'rgba(240, 246, 252, 0.07)')};
+  border-radius: 12px;
   display: flex;
   flex-direction: column;
   align-items: center;
   justify-content: center;
   gap: 8px;
   cursor: pointer;
-  transition: all 0.3s ease;
-  color: ${props => props.$active ? '#00ff41' : '#888'};
-  
+  transition:
+    border-color 0.25s ease,
+    box-shadow 0.25s ease,
+    background 0.25s ease,
+    transform 0.2s ease;
+  color: ${(props) => (props.$active ? 'var(--dw-accent)' : 'var(--dw-muted)')};
+
   &:hover {
-    border-color: rgba(0, 255, 255, 0.6);
-    box-shadow: 0 0 20px rgba(0, 255, 65, 0.4);
-    transform: translateY(-3px);
-    color: #00ff41;
+    background: var(--dw-surface-hover);
+    border-color: rgba(61, 237, 151, 0.35);
+    color: var(--dw-accent);
+    box-shadow: 0 4px 20px rgba(0, 0, 0, 0.35);
   }
-  
+
   svg {
-    font-size: 1.8rem;
+    font-size: 1.55rem;
+    opacity: ${(props) => (props.$active ? 1 : 0.85)};
   }
 `;
 
 const DeviceLabel = styled.div`
-  font-size: 0.75rem;
+  font-size: 0.68rem;
   font-weight: 600;
   font-family: 'Orbitron', sans-serif;
   text-transform: uppercase;
-  letter-spacing: 1px;
+  letter-spacing: 0.12em;
 `;
 
 const PhoneFrame = styled(motion.div)`
-  width: 340px;
-  height: 760px;
+  width: 400px;
+  height: 900px;
   background: linear-gradient(145deg, 
     rgba(20, 20, 20, 0.95) 0%, 
     rgba(40, 40, 40, 0.95) 50%,
@@ -495,18 +583,18 @@ const EmailList = styled.div`
 const EmailItem = styled(motion.div)`
   background: linear-gradient(135deg, 
     rgba(0, 0, 0, 0.6) 0%, 
-    ${props => props.isPhishing ? 'rgba(255, 0, 64, 0.1)' : 'rgba(0, 255, 65, 0.1)'} 100%);
+    rgba(0, 255, 65, 0.1) 100%);
   backdrop-filter: blur(10px);
   border-radius: 15px;
   padding: 18px;
-  border-left: 4px solid ${props => props.isPhishing ? 'rgba(255, 0, 64, 0.6)' : 'rgba(0, 255, 65, 0.6)'};
+  border-left: 4px solid rgba(0, 255, 65, 0.6);
   cursor: pointer;
   transition: all 0.3s ease;
-  border: 1px solid ${props => props.isPhishing ? 'rgba(255, 0, 64, 0.2)' : 'rgba(0, 255, 65, 0.2)'};
+  border: 1px solid rgba(0, 255, 65, 0.2);
   
   &:hover {
-    border-color: ${props => props.isPhishing ? 'rgba(255, 0, 64, 0.5)' : 'rgba(0, 255, 255, 0.5)'};
-    box-shadow: 0 0 20px ${props => props.isPhishing ? 'rgba(255, 0, 64, 0.3)' : 'rgba(0, 255, 65, 0.3)'};
+    border-color: rgba(0, 255, 255, 0.5);
+    box-shadow: 0 0 20px rgba(0, 255, 65, 0.3);
     transform: translateX(5px);
   }
 `;
@@ -544,23 +632,6 @@ const EmailPreview = styled.div`
   color: #aaa;
   font-size: 12px;
   line-height: 1.4;
-`;
-
-const PhishingWarning = styled.div`
-  background: linear-gradient(135deg, 
-    rgba(255, 0, 64, 0.2) 0%, 
-    rgba(255, 0, 64, 0.1) 100%);
-  backdrop-filter: blur(5px);
-  border: 1px solid rgba(255, 0, 64, 0.4);
-  border-radius: 10px;
-  padding: 10px;
-  margin-top: 10px;
-  color: #ff0040;
-  font-size: 11px;
-  display: flex;
-  align-items: center;
-  gap: 8px;
-  box-shadow: 0 0 15px rgba(255, 0, 64, 0.2);
 `;
 
 const MessageList = styled.div`
@@ -1264,8 +1335,13 @@ const PINDisplayHint = styled(motion.div)`
   letter-spacing: 3px;
 `;
 
-const Phone = ({ user }) => {
+const Phone = ({ user, hideEmbeddedLaptopKeyboard = false }) => {
   const { gameState, dispatch } = useGame();
+  const searchParams = useUrlSearchParams();
+  const missionParam = searchParams.get('mission');
+  const parsedMission = missionParam != null && missionParam !== '' ? parseInt(missionParam, 10) : NaN;
+  const missionId = Number.isFinite(parsedMission) ? parsedMission : null;
+
   const [currentApp, setCurrentApp] = useState(null);
   const [batteryLevel, setBatteryLevel] = useState(gameState.phone.battery);
   const [dialedNumber, setDialedNumber] = useState('');
@@ -1280,6 +1356,14 @@ const Phone = ({ user }) => {
   const [pinError, setPinError] = useState('');
   const [showPINHint, setShowPINHint] = useState(false);
   const [selectedDevice, setSelectedDevice] = useState('phone');
+
+  useEffect(() => {
+    const d = searchParams.get('device');
+    if (d === 'laptop') setSelectedDevice('laptop');
+    if (d === 'router') setSelectedDevice('router');
+    if (d === 'internet') setSelectedDevice('internet');
+    if (d === 'phone') setSelectedDevice('phone');
+  }, [searchParams]);
 
   // Debug: Log equipment changes
   useEffect(() => {
@@ -1388,24 +1472,21 @@ const Phone = ({ user }) => {
       sender: 'Daily Credit',
       subject: 'Your $50 Daily Credit is Ready!',
       preview: 'Click here to claim your free $50 credit...',
-      time: '2 min ago',
-      isPhishing: false
+      time: '2 min ago'
     },
     {
       id: 2,
-      sender: 'Bank Security',
-      subject: 'Urgent: Verify Your Account',
-      preview: 'Your account has been compromised. Click to verify...',
-      time: '15 min ago',
-      isPhishing: true
+      sender: 'Bank Newsletter',
+      subject: 'Your monthly statement is available',
+      preview: 'View your balance and recent transactions in the secure portal.',
+      time: '15 min ago'
     },
     {
       id: 3,
       sender: 'Tech Support',
-      subject: 'Update Required',
-      preview: 'Your device needs an immediate security update...',
-      time: '1 hour ago',
-      isPhishing: true
+      subject: 'Optional maintenance window',
+      preview: 'We may perform brief maintenance Sunday 2–4 AM. No action required.',
+      time: '1 hour ago'
     }
   ];
 
@@ -1438,10 +1519,10 @@ const Phone = ({ user }) => {
       risk: 'High Risk'
     },
     {
-      name: 'Bank Login',
-      url: 'bank-security-verify.com',
-      description: 'Verify your banking information',
-      risk: 'Phishing Site'
+      name: 'Community Bank',
+      url: 'community-bank.example',
+      description: 'Official online banking portal',
+      risk: 'Safe'
     }
   ];
 
@@ -1603,7 +1684,6 @@ const Phone = ({ user }) => {
                 {emails.map(email => (
                   <EmailItem
                     key={email.id}
-                    isPhishing={email.isPhishing}
                     whileHover={{ scale: 1.02 }}
                     whileTap={{ scale: 0.98 }}
                   >
@@ -1613,12 +1693,6 @@ const Phone = ({ user }) => {
                     </EmailHeader>
                     <EmailSubject>{email.subject}</EmailSubject>
                     <EmailPreview>{email.preview}</EmailPreview>
-                    {email.isPhishing && gameState.phone.model !== 'Basic Phone' && (
-                      <PhishingWarning>
-                        <FaExclamationTriangle />
-                        WARNING: This appears to be a phishing attempt!
-                      </PhishingWarning>
-                    )}
                   </EmailItem>
                 ))}
               </EmailList>
@@ -1953,49 +2027,118 @@ const Phone = ({ user }) => {
   if (!gameState.phone.owned) {
     return (
       <PhoneContainer>
-        <PhoneFrame
-          initial={{ scale: 0.8, opacity: 0 }}
-          animate={{ scale: 1, opacity: 1 }}
-          transition={{ duration: 0.5 }}
-        >
-          <PhoneScreen>
-            <StatusBar>
-              <Time>{getCurrentTime()}</Time>
-              <SignalIcon>
-                <FaSignal />
-                <FaWifi />
-              </SignalIcon>
-              <BatteryIcon>
-                <FaBatteryEmpty />
-                <span>0%</span>
-              </BatteryIcon>
-            </StatusBar>
-            <div style={{ 
-              display: 'flex', 
-              flexDirection: 'column', 
-              alignItems: 'center', 
-              justifyContent: 'center', 
-              height: '100%',
-              padding: '40px',
-              textAlign: 'center'
-            }}>
-              <FaPhone size={64} color="#666" style={{ marginBottom: '20px' }} />
-              <div style={{ color: '#888', fontSize: '18px', marginBottom: '10px' }}>
-                No Phone
-              </div>
-              <div style={{ color: '#666', fontSize: '14px' }}>
-                Purchase a phone from the Store to use this feature
-              </div>
-            </div>
-            <HomeIndicator />
-          </PhoneScreen>
-        </PhoneFrame>
+        <WorkspaceInner>
+          <WorkspaceHeader>
+            <WorkspaceEyebrow>Operations</WorkspaceEyebrow>
+            <WorkspaceTitle>Device workspace</WorkspaceTitle>
+            <WorkspaceSubtitle>
+              Purchase a phone in the store to unlock the handset simulator and full device controls.
+            </WorkspaceSubtitle>
+          </WorkspaceHeader>
+          <WorkspaceMain>
+            <PhoneFrame
+              initial={{ scale: 0.8, opacity: 0 }}
+              animate={{ scale: 1, opacity: 1 }}
+              transition={{ duration: 0.5 }}
+            >
+              <PhoneScreen>
+                <StatusBar>
+                  <Time>{getCurrentTime()}</Time>
+                  <SignalIcon>
+                    <FaSignal />
+                    <FaWifi />
+                  </SignalIcon>
+                  <BatteryIcon>
+                    <FaBatteryEmpty />
+                    <span>0%</span>
+                  </BatteryIcon>
+                </StatusBar>
+                <div
+                  style={{
+                    display: 'flex',
+                    flexDirection: 'column',
+                    alignItems: 'center',
+                    justifyContent: 'center',
+                    height: '100%',
+                    padding: '40px',
+                    textAlign: 'center'
+                  }}
+                >
+                  <FaPhone size={64} color="#484f58" style={{ marginBottom: '20px' }} />
+                  <div style={{ color: '#8b949e', fontSize: '17px', marginBottom: '10px', fontWeight: 600 }}>
+                    No phone on account
+                  </div>
+                  <div style={{ color: '#6e7681', fontSize: '14px', lineHeight: 1.5 }}>
+                    Purchase a phone from the Store to use this workspace
+                  </div>
+                </div>
+                <HomeIndicator />
+              </PhoneScreen>
+            </PhoneFrame>
+          </WorkspaceMain>
+        </WorkspaceInner>
       </PhoneContainer>
     );
   }
 
   return (
     <PhoneContainer>
+      <WorkspaceInner>
+        <WorkspaceHeader>
+          <WorkspaceEyebrow>Operations</WorkspaceEyebrow>
+          <WorkspaceTitle>Device workspace</WorkspaceTitle>
+          <WorkspaceSubtitle>
+            Switch between simulated phone, laptop, router, and connectivity. Development tools appear below when
+            relevant.
+          </WorkspaceSubtitle>
+        </WorkspaceHeader>
+
+        <DeviceDock aria-label="Select device">
+          <DeviceButton
+            $active={selectedDevice === 'phone'}
+            onClick={() => setSelectedDevice('phone')}
+            whileHover={{ scale: 1.03 }}
+            whileTap={{ scale: 0.98 }}
+          >
+            <FaPhone />
+            <DeviceLabel>Phone</DeviceLabel>
+          </DeviceButton>
+
+          <DeviceButton
+            $active={selectedDevice === 'laptop'}
+            onClick={() => setSelectedDevice('laptop')}
+            whileHover={{ scale: 1.03 }}
+            whileTap={{ scale: 0.98 }}
+            title="Laptop"
+          >
+            <FaLaptop />
+            <DeviceLabel>Laptop</DeviceLabel>
+          </DeviceButton>
+
+          <DeviceButton
+            $active={selectedDevice === 'router'}
+            onClick={() => setSelectedDevice('router')}
+            whileHover={{ scale: 1.03 }}
+            whileTap={{ scale: 0.98 }}
+            title="Router"
+          >
+            <FaNetworkWired />
+            <DeviceLabel>Router</DeviceLabel>
+          </DeviceButton>
+
+          <DeviceButton
+            $active={selectedDevice === 'internet'}
+            onClick={() => setSelectedDevice('internet')}
+            whileHover={{ scale: 1.03 }}
+            whileTap={{ scale: 0.98 }}
+            title="Internet connectivity"
+          >
+            <FaGlobe />
+            <DeviceLabel>Internet</DeviceLabel>
+          </DeviceButton>
+        </DeviceDock>
+
+        <WorkspaceMain>
       <PhoneWrapper>
         {selectedDevice === 'phone' && (
           <PhoneFrame
@@ -2191,7 +2334,11 @@ const Phone = ({ user }) => {
             transition={{ duration: 0.3 }}
             style={{ width: '100%', maxWidth: '100%' }}
           >
-            <LaptopInterface device={gameState.devices.laptop} />
+            <LaptopInterface
+              device={gameState.devices.laptop}
+              hideKeyboard={hideEmbeddedLaptopKeyboard}
+              missionId={missionId}
+            />
           </motion.div>
         )}
         
@@ -2272,51 +2419,8 @@ const Phone = ({ user }) => {
           </motion.div>
         )}
       </AnimatePresence>
-      
-      <DeviceSelection>
-        <DeviceButton
-          $active={selectedDevice === 'phone'}
-          onClick={() => setSelectedDevice('phone')}
-          whileHover={{ scale: 1.1 }}
-          whileTap={{ scale: 0.9 }}
-        >
-          <FaPhone />
-          <DeviceLabel>Phone</DeviceLabel>
-        </DeviceButton>
-        
-        <DeviceButton
-          $active={selectedDevice === 'laptop'}
-          onClick={() => setSelectedDevice('laptop')}
-          whileHover={{ scale: 1.1 }}
-          whileTap={{ scale: 0.9 }}
-          title="Switch to Laptop"
-        >
-          <FaLaptop />
-          <DeviceLabel>Laptop</DeviceLabel>
-        </DeviceButton>
-        
-        <DeviceButton
-          $active={selectedDevice === 'router'}
-          onClick={() => setSelectedDevice('router')}
-          whileHover={{ scale: 1.1 }}
-          whileTap={{ scale: 0.9 }}
-          title="Switch to Router"
-        >
-          <FaNetworkWired />
-          <DeviceLabel>Router</DeviceLabel>
-        </DeviceButton>
-        
-        <DeviceButton
-          $active={selectedDevice === 'internet'}
-          onClick={() => setSelectedDevice('internet')}
-          whileHover={{ scale: 1.1 }}
-          whileTap={{ scale: 0.9 }}
-          title="Internet Connectivity"
-        >
-          <FaGlobe />
-          <DeviceLabel>Internet</DeviceLabel>
-        </DeviceButton>
-      </DeviceSelection>
+        </WorkspaceMain>
+      </WorkspaceInner>
     </PhoneContainer>
   );
 };

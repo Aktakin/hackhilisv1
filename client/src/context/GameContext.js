@@ -2,11 +2,11 @@ import React, { createContext, useContext, useReducer, useEffect } from 'react';
 
 const GameContext = createContext();
 
-// Function to generate unique IP address based on username
+// Function to generate unique simulation-only IP identifier based on username
 const generateUserIP = (username) => {
   // Check if username exists and is a string
   if (!username || typeof username !== 'string') {
-    return '192.168.1.1'; // Default IP if username is invalid
+    return 'SIM-000.000.000-USR'; // Default simulated identifier
   }
   
   // Create a hash from the username
@@ -17,12 +17,25 @@ const generateUserIP = (username) => {
     hash = hash & hash; // Convert to 32-bit integer
   }
   
-  // Ensure positive number and map to IP range 192.168.x.y
+  // Ensure positive number and map to a stable simulation identifier
   const uniqueID = Math.abs(hash) % 254 + 1; // 1-254 for last octet
   const subnet = Math.abs(hash >> 8) % 254 + 1; // 1-254 for third octet
+  const segment = Math.abs(hash >> 16) % 254 + 1; // 1-254 for second octet
   
-  return `192.168.${subnet}.${uniqueID}`;
+  const toOctet = (num) => String(num).padStart(3, '0');
+  return `SIM-${toOctet(segment)}.${toOctet(subnet)}.${toOctet(uniqueID)}-USR`;
 };
+
+/** Avoid blank screen if localStorage has empty or invalid JSON (JSON.parse throws synchronously). */
+function safeParseLocalStorageJson(key) {
+  try {
+    const raw = localStorage.getItem(key);
+    if (raw == null || raw === '') return null;
+    return JSON.parse(raw);
+  } catch {
+    return null;
+  }
+}
 
 const initialState = {
   user: null,
@@ -31,8 +44,8 @@ const initialState = {
   experience: 0,
   ipAddress: null, // Unique IP address for this user
   gameMode: localStorage.getItem('hackhilis_gameMode') || 'free', // 'free' or 'story'
-  character: JSON.parse(localStorage.getItem('hackhilis_character')) || null, // Character data for story mode
-  story: JSON.parse(localStorage.getItem('hackhilis_story')) || null, // Story progress data
+  character: safeParseLocalStorageJson('hackhilis_character'),
+  story: safeParseLocalStorageJson('hackhilis_story'),
   phone: {
     owned: false,
     model: null,
@@ -615,28 +628,6 @@ const gameReducer = (state, action) => {
         skills: action.payload
       };
 
-    case 'CONNECT_INTERNET':
-      return {
-        ...state,
-        internet: {
-          connected: true,
-          type: action.payload.type,
-          provider: action.payload.provider,
-          cost: action.payload.cost
-        }
-      };
-
-    case 'DISCONNECT_INTERNET':
-      return {
-        ...state,
-        internet: {
-          connected: false,
-          type: null,
-          provider: null,
-          cost: 0
-        }
-      };
-
     case 'CONNECT_DEVICE':
       return {
         ...state,
@@ -658,6 +649,7 @@ const gameReducer = (state, action) => {
 export const GameProvider = ({ children, user }) => {
   // Create user-specific localStorage key
   const getStorageKey = (username) => `hackhilis_game_state_${username}`;
+  const isSimulatedIp = (ip) => typeof ip === 'string' && /^SIM-\d{3}\.\d{3}\.\d{3}-USR$/.test(ip);
 
   const [gameState, dispatch] = useReducer(gameReducer, initialState);
 
@@ -707,7 +699,10 @@ export const GameProvider = ({ children, user }) => {
             dispatch({ type: 'SET_INTERNET', payload: parsedState.internet });
           }
           if (parsedState.ipAddress !== undefined) {
-            dispatch({ type: 'SET_IP_ADDRESS', payload: parsedState.ipAddress });
+            const normalizedIp = isSimulatedIp(parsedState.ipAddress)
+              ? parsedState.ipAddress
+              : generateUserIP(user.username);
+            dispatch({ type: 'SET_IP_ADDRESS', payload: normalizedIp });
           }
         } catch (error) {
           console.error('Error loading user-specific state:', error);

@@ -1,5 +1,5 @@
 import React, { useState, useEffect, useRef } from 'react';
-import styled, { keyframes } from 'styled-components';
+import styled, { keyframes, css } from 'styled-components';
 import { motion, AnimatePresence } from 'framer-motion';
 import { useGame } from '../context/GameContext';
 import { 
@@ -64,11 +64,389 @@ import {
   FaStickyNote
 } from 'react-icons/fa';
 
+/** Custom stroke icons for Kali desktop (square cards unchanged; glyphs only). */
+function KaliDesktopGlyph({ kind, style, ...rest }) {
+  const svg = {
+    width: '1em',
+    height: '1em',
+    viewBox: '0 0 24 24',
+    fill: 'none',
+    stroke: 'currentColor',
+    strokeWidth: 1.65,
+    strokeLinecap: 'round',
+    strokeLinejoin: 'round',
+    style: { display: 'block', ...style },
+    'aria-hidden': true,
+    ...rest
+  };
+
+  switch (kind) {
+    case 'email':
+      return (
+        <svg {...svg}>
+          <path d="M22 2L11 13" />
+          <path d="M22 2l-7 20-3-9-9-3 20-8z" />
+        </svg>
+      );
+    case 'terminal':
+      return (
+        <svg {...svg}>
+          <rect x="3" y="4" width="18" height="16" rx="2" />
+          <path d="M7 9l3 3-3 3" />
+          <path d="M12 15h5" />
+        </svg>
+      );
+    case 'explorer':
+      return (
+        <svg {...svg}>
+          <rect x="4" y="3" width="16" height="18" rx="1.5" />
+          <line x1="7" y1="9" x2="17" y2="9" />
+          <line x1="7" y1="13" x2="17" y2="13" />
+          <line x1="7" y1="17" x2="17" y2="17" />
+        </svg>
+      );
+    case 'browser':
+      return (
+        <svg {...svg}>
+          <rect x="3" y="4" width="18" height="16" rx="2" />
+          <path d="M3 9h18" />
+          <circle cx="6" cy="6.5" r="0.75" fill="currentColor" stroke="none" />
+          <circle cx="9" cy="6.5" r="0.75" fill="currentColor" stroke="none" />
+          <circle cx="12" cy="6.5" r="0.75" fill="currentColor" stroke="none" />
+          <rect x="5" y="11" width="14" height="7" rx="1" />
+        </svg>
+      );
+    case 'settings':
+      return (
+        <svg {...svg}>
+          <path d="M4 6h16M4 12h16M4 18h16" />
+          <circle cx="15" cy="6" r="1.5" fill="currentColor" stroke="none" />
+          <circle cx="9" cy="12" r="1.5" fill="currentColor" stroke="none" />
+          <circle cx="13" cy="18" r="1.5" fill="currentColor" stroke="none" />
+        </svg>
+      );
+    case 'cloud':
+      return (
+        <svg {...svg}>
+          <path d="M18 10h-1.26A8 8 0 1 0 9 20h9a5 5 0 0 0 0-10z" />
+        </svg>
+      );
+    case 'screenshot':
+      return (
+        <svg {...svg}>
+          <path d="M4 8V4h4M20 8V4h-4M4 16v4h4M20 16v4h-4" />
+          <rect x="7" y="7" width="10" height="10" rx="1" />
+        </svg>
+      );
+    default:
+      return (
+        <svg {...svg}>
+          <rect x="4" y="4" width="16" height="16" rx="2" />
+        </svg>
+      );
+  }
+}
+
+function kaliIcon(kind) {
+  const Icon = (props) => <KaliDesktopGlyph kind={kind} {...props} />;
+  Icon.displayName = `KaliIcon(${kind})`;
+  return Icon;
+}
+
+const INITIAL_MISSION1_PHASE1 = {
+  cafeWifi: false,
+  openvpnInstalled: false,
+  vpnDaemon: false,
+  ufwEnabled: false,
+  ufwDenyIncoming: false,
+  ufwAllowVpnOut: false,
+  iptablesDnsOut: false,
+  iptablesOutputDrop: false,
+  ipForwardZero: false,
+  unboundInstalled: false,
+  unboundRestarted: false,
+  macRandomized: false,
+  auditOrKillSwitch: false
+};
+
+function isMission1Phase1Complete(p1) {
+  if (!p1) return false;
+  return Object.values(p1).every(Boolean);
+}
+
+function isMission1AttackCommand(cmd) {
+  const c = cmd.trim().toLowerCase();
+  if (c.startsWith('sudo bettercap')) return true;
+  if (c.startsWith('sudo airmon-ng')) return true;
+  if (c.startsWith('sudo hostapd')) return true;
+  if (c.startsWith('sudo dnsmasq')) return true;
+  if (c.startsWith('sudo aireplay-ng')) return true;
+  if (c.startsWith('sudo tcpdump')) return true;
+  if (c === 'arp.spoof on' || /\barp\.spoof on\b/.test(c)) return true;
+  if (c === 'net.sniff on' || /\bnet\.sniff on\b/.test(c)) return true;
+  if (c.includes('ip_forward=1') && c.includes('sysctl')) return true;
+  if (c.includes('iptables') && (c.includes('masquerade') || c.includes('-t nat'))) return true;
+  if (c.startsWith('wireshark')) return true;
+  if (c === 'view captured' || c === 'analyze captured' || c === 'show captured') return true;
+  return false;
+}
+
+/**
+ * Mission 1 Phase 1 — public WiFi hardening (simulated).
+ * Returns terminal output string if this command is handled; otherwise null (fall through).
+ */
+function handleMission1Phase1Command(cmd, setMitmState, phase1Snapshot) {
+  const trimmed = cmd.trim();
+  const low = trimmed.toLowerCase();
+
+  if (/nmcli\s+dev\s+wifi\s+connect\s+CafeFreeNet/i.test(trimmed)) {
+    setMitmState((prev) => ({
+      ...prev,
+      mission1Phase1: { ...prev.mission1Phase1, cafeWifi: true }
+    }));
+    return (
+      "Device 'wlan0' successfully activated with 'CafeFreeNet'.\n" +
+      'SSID: CafeFreeNet  Security: WPA2  Channel: 11  IP: 10.8.0.24/24\n' +
+      'You are on the coffee shop network — harden before attacking.'
+    );
+  }
+
+  if (low.startsWith('sudo apt install')) {
+    const rest = trimmed.replace(/^sudo\s+apt\s+install\s+/i, '').trim();
+    const installOpenvpn = /(^|[\s,])openvpn([\s,]|$)/i.test(rest);
+    const installUnbound = /(^|[\s,])unbound([\s,]|$)/i.test(rest);
+    if (installOpenvpn || installUnbound) {
+      setMitmState((prev) => ({
+        ...prev,
+        mission1Phase1: {
+          ...prev.mission1Phase1,
+          ...(installOpenvpn ? { openvpnInstalled: true } : {}),
+          ...(installUnbound ? { unboundInstalled: true } : {})
+        }
+      }));
+      return (
+        'Reading package lists... Done\n' +
+        'Building dependency tree... Done\n' +
+        `The following NEW packages will be installed:\n  ${rest}\n` +
+        '0 upgraded, newly installed, 0 to remove\n' +
+        'Unpacking and setting up packages...\n' +
+        'Done.'
+      );
+    }
+    return null;
+  }
+
+  if (/openvpn\s+--config\s+\S+\s+--daemon/i.test(trimmed)) {
+    setMitmState((prev) => ({
+      ...prev,
+      mission1Phase1: { ...prev.mission1Phase1, vpnDaemon: true }
+    }));
+    return (
+      '2026-04-16 10:15:22 OpenVPN 2.6.10 [linux-x86_64] [SSL (OpenSSL)] [LZO] [LZ4]\n' +
+      '... TLS: Initial packet from [AF_INET]198.51.100.10:1194\n' +
+      '... Peer Connection Initiated with 198.51.100.10:1194\n' +
+      '... Initialization Sequence Completed\n' +
+      'Daemon started. Check: ps aux | grep openvpn — expect a PID. ip a — expect tun0.'
+    );
+  }
+
+  if (low === 'sudo ufw enable') {
+    setMitmState((prev) => ({
+      ...prev,
+      mission1Phase1: { ...prev.mission1Phase1, ufwEnabled: true }
+    }));
+    return 'Firewall is active and enabled on system startup';
+  }
+
+  if (low === 'sudo ufw default deny incoming') {
+    setMitmState((prev) => ({
+      ...prev,
+      mission1Phase1: { ...prev.mission1Phase1, ufwDenyIncoming: true }
+    }));
+    return 'Default incoming policy changed to \'deny\'\n(be sure to allow SSH if you need it).';
+  }
+
+  if (low === 'sudo ufw allow out 1194/udp') {
+    setMitmState((prev) => ({
+      ...prev,
+      mission1Phase1: { ...prev.mission1Phase1, ufwAllowVpnOut: true }
+    }));
+    return 'Rule added: allow OUT 1194/udp';
+  }
+
+  if (
+    low.includes('iptables') &&
+    low.includes('output') &&
+    low.includes('dport 53') &&
+    low.includes('accept')
+  ) {
+    setMitmState((prev) => ({
+      ...prev,
+      mission1Phase1: { ...prev.mission1Phase1, iptablesDnsOut: true }
+    }));
+    return (
+      'Chain OUTPUT (policy ACCEPT)\n' +
+      'target     prot opt source               destination\n' +
+      'ACCEPT     udp  --  anywhere             anywhere             udp dpt:domain'
+    );
+  }
+
+  if (
+    low.includes('iptables') &&
+    low.includes('output') &&
+    low.includes('-j drop') &&
+    !low.includes('dport 53')
+  ) {
+    setMitmState((prev) => ({
+      ...prev,
+      mission1Phase1: { ...prev.mission1Phase1, iptablesOutputDrop: true }
+    }));
+    return (
+      'Chain OUTPUT (policy DROP)\n' +
+      '... DROP all -- anywhere anywhere\n' +
+      '(Simulated fail-closed outbound; DNS rule should appear above DROP.)'
+    );
+  }
+
+  if (low.includes('sysctl') && low.includes('ip_forward=0')) {
+    setMitmState((prev) => ({
+      ...prev,
+      mission1Phase1: { ...prev.mission1Phase1, ipForwardZero: true }
+    }));
+    return 'net.ipv4.ip_forward = 0';
+  }
+
+  if (low.includes('systemctl') && low.includes('restart') && low.includes('unbound')) {
+    if (!phase1Snapshot.unboundInstalled) {
+      return 'Job failed: unbound.service not found. Install with: sudo apt install unbound';
+    }
+    setMitmState((prev) => ({
+      ...prev,
+      mission1Phase1: { ...prev.mission1Phase1, unboundRestarted: true }
+    }));
+    return (
+      '● unbound.service - Unbound DNS server\n' +
+      '     Active: active (running)\n' +
+      'Test: dig @127.0.0.1 google.com +dnssec — look for flags: ad (authenticated data).'
+    );
+  }
+
+  if (low.includes('macchanger') && low.includes('-r') && low.includes('wlan0')) {
+    setMitmState((prev) => ({
+      ...prev,
+      mission1Phase1: { ...prev.mission1Phase1, macRandomized: true }
+    }));
+    return (
+      'Current MAC:   02:aa:bb:cc:dd:01 (wlan0)\n' +
+      'Permanent MAC: 52:54:00:ab:cd:ef (wlan0)\n' +
+      'New MAC:       4e:91:f2:18:3c:7a (random)\n' +
+      'MAC randomized — harder to track this session.'
+    );
+  }
+
+  if (/^\s*protonvpn-cli\s+ks\b/i.test(trimmed)) {
+    setMitmState((prev) => ({
+      ...prev,
+      mission1Phase1: { ...prev.mission1Phase1, auditOrKillSwitch: true }
+    }));
+    return 'Kill switch: enabled — traffic drops if the VPN tunnel goes down.';
+  }
+
+  if (/history\s*>\s*protected\.log/i.test(trimmed)) {
+    setMitmState((prev) => ({
+      ...prev,
+      mission1Phase1: { ...prev.mission1Phase1, auditOrKillSwitch: true }
+    }));
+    return 'Wrote shell history to ~/protected.log (simulated) — audit trail saved.';
+  }
+
+  if (low.includes('curl') && low.includes('ipinfo.io/ip')) {
+    if (phase1Snapshot.vpnDaemon) {
+      return '198.51.100.42\n';
+    }
+    return '203.0.113.88\n';
+  }
+
+  if (low.includes('curl') && low.includes('ipinfo.io') && !low.includes('/ip')) {
+    return (
+      '{\n' +
+      '  "ip": "' +
+      (phase1Snapshot.vpnDaemon ? '198.51.100.42' : '203.0.113.88') +
+      '",\n' +
+      '  "city": "' +
+      (phase1Snapshot.vpnDaemon ? 'Zurich' : 'Springfield') +
+      '"\n' +
+      '}'
+    );
+  }
+
+  if (low.includes('ps aux') && low.includes('grep') && low.includes('openvpn')) {
+    if (phase1Snapshot.vpnDaemon) {
+      return 'kali  18421  0.1  0.2  ... /usr/sbin/openvpn --config your_vpn.ovpn';
+    }
+    return 'kali  18421  0.0  0.0  ... grep --color=auto openvpn';
+  }
+
+  if (low.includes('dig @127.0.0.1') && low.includes('google.com')) {
+    return (
+      ';; ->>HEADER<<- opcode: QUERY, status: NOERROR, id: 60211\n' +
+      ';; flags: qr rd ra ad; QUERY: 1, ANSWER: 1\n' +
+      ';; ANSWER SECTION:\n' +
+      'google.com.  300  IN  A  142.250.185.14'
+    );
+  }
+
+  if (low.includes('watch') && low.includes('arp')) {
+    return (
+      'Every 1.0s: arp -a | grep dup\n' +
+      '(no duplicate MACs — link looks clean in this simulation)'
+    );
+  }
+
+  return null;
+}
+
+function formatMission1Status(mitm) {
+  const p = mitm.mission1Phase1 || INITIAL_MISSION1_PHASE1;
+  const p1Done = isMission1Phase1Complete(p);
+  const lines = [
+    '=== Mission 1: MitM on Public WiFi (authorized pentest) ===',
+    '',
+    'Scenario: Team router is down — you must use CafeFreeNet to reach targets.',
+    'Phase 1 — Harden on public WiFi (complete all before Phase 2):',
+    `  [${p.cafeWifi ? 'x' : ' '}] nmcli dev wifi connect CafeFreeNet`,
+    `  [${p.openvpnInstalled ? 'x' : ' '}] sudo apt install openvpn`,
+    `  [${p.vpnDaemon ? 'x' : ' '}] openvpn --config your_vpn.ovpn --daemon`,
+    `  [${p.ufwEnabled ? 'x' : ' '}] sudo ufw enable`,
+    `  [${p.ufwDenyIncoming ? 'x' : ' '}] sudo ufw default deny incoming`,
+    `  [${p.ufwAllowVpnOut ? 'x' : ' '}] sudo ufw allow out 1194/udp`,
+    `  [${p.iptablesDnsOut ? 'x' : ' '}] sudo iptables -A OUTPUT -p udp --dport 53 -j ACCEPT`,
+    `  [${p.iptablesOutputDrop ? 'x' : ' '}] sudo iptables -A OUTPUT -j DROP`,
+    `  [${p.ipForwardZero ? 'x' : ' '}] sudo sysctl net.ipv4.ip_forward=0`,
+    `  [${p.unboundInstalled ? 'x' : ' '}] sudo apt install unbound`,
+    `  [${p.unboundRestarted ? 'x' : ' '}] sudo systemctl restart unbound`,
+    `  [${p.macRandomized ? 'x' : ' '}] sudo macchanger -r wlan0`,
+    `  [${p.auditOrKillSwitch ? 'x' : ' '}] protonvpn-cli ks OR history > protected.log`,
+    '',
+    `Phase 1 status: ${p1Done ? 'COMPLETE — you may run Phase 2 (attack / MitM) commands.' : 'IN PROGRESS'}`,
+    '',
+    'Phase 2 — Attack (after Phase 1): tools, rogue AP / bettercap, ARP spoof, sniff, capture.',
+    `Tools installed (attack): ${mitm.toolsInstalled ? 'yes' : 'no'}`,
+    `Bettercap: ${mitm.bettercapRunning ? 'on' : 'off'}  ARP spoof: ${mitm.arpSpoofing ? 'on' : 'off'}  Sniff: ${mitm.sniffing ? 'on' : 'off'}`,
+    `Captured packets: ${mitm.capturedPackets}`,
+    '',
+    p1Done
+      ? 'Complete the mission: capture traffic (net.sniff on) then analyze (view captured).'
+      : 'Attack commands are locked until Phase 1 checklist is complete. Type help for hints.'
+  ];
+  return lines.join('\n');
+}
+
 // Laptop Frame Styles
 const LaptopWrapper = styled.div`
   display: flex;
   width: 100%;
-  max-width: 1600px;
+  max-width: 1720px;
   margin: 0 auto;
   perspective: 2000px;
 `;
@@ -82,7 +460,7 @@ const LaptopFrame = styled.div`
     0 0 0 1px rgba(255, 255, 255, 0.05),
     inset 0 1px 0 rgba(255, 255, 255, 0.1);
   flex: 1;
-  min-width: 700px;
+  min-width: 920px;
   position: relative;
   
   &::before {
@@ -125,7 +503,7 @@ const LaptopScreen = styled.div`
   overflow: hidden;
   position: relative;
   aspect-ratio: 16/10;
-  min-height: 550px;
+  min-height: 680px;
   box-shadow: 
     inset 0 0 50px rgba(0, 0, 0, 0.8),
     0 0 0 2px rgba(0, 255, 65, 0.1),
@@ -186,9 +564,13 @@ const Desktop = styled.div`
   width: 100%;
   height: 100%;
   background: 
-    radial-gradient(circle at 20% 30%, rgba(30, 60, 114, 0.8) 0%, transparent 50%),
-    radial-gradient(circle at 80% 70%, rgba(42, 82, 152, 0.8) 0%, transparent 50%),
-    linear-gradient(135deg, #0f1b2e 0%, #1a2f4f 50%, #0f1b2e 100%);
+    ${({ $kali }) => ($kali
+      ? `radial-gradient(circle at 18% 22%, rgba(0, 200, 210, 0.2) 0%, transparent 36%),
+         radial-gradient(circle at 78% 72%, rgba(100, 130, 255, 0.26) 0%, transparent 40%),
+         linear-gradient(135deg, #0c121c 0%, #121c2e 42%, #0e1622 100%)`
+      : `radial-gradient(circle at 20% 30%, rgba(30, 60, 114, 0.8) 0%, transparent 50%),
+         radial-gradient(circle at 80% 70%, rgba(42, 82, 152, 0.8) 0%, transparent 50%),
+         linear-gradient(135deg, #0f1b2e 0%, #1a2f4f 50%, #0f1b2e 100%)`)};
   position: relative;
   overflow: hidden;
   
@@ -213,112 +595,250 @@ const Desktop = styled.div`
 `;
 
 const DesktopIcons = styled.div`
-  display: flex;
-  flex-direction: row;
-  flex-wrap: wrap;
+  display: ${({ $kali }) => ($kali ? 'grid' : 'flex')};
+  flex-direction: ${({ $kali }) => ($kali ? 'row' : 'row')};
+  flex-wrap: ${({ $kali }) => ($kali ? 'wrap' : 'wrap')};
+  grid-template-columns: ${({ $kali }) => ($kali ? 'repeat(2, minmax(0, 1fr))' : 'none')};
   align-content: flex-start;
-  gap: 30px 40px;
-  padding: 25px;
+  align-items: ${({ $kali }) => ($kali ? 'stretch' : 'initial')};
+  justify-items: ${({ $kali }) => ($kali ? 'stretch' : 'stretch')};
+  gap: ${({ $kali }) => ($kali ? '14px 16px' : '30px 40px')};
+  padding: ${({ $kali }) =>
+    $kali ? 'calc(56px * 1.2) 22px 20px 16px' : '25px'};
   position: absolute;
   top: 0;
   left: 0;
   z-index: 2;
-  max-width: calc(100% - 50px);
+  max-width: ${({ $kali }) => ($kali ? 'min(420px, calc(100% - 16px))' : 'calc(100% - 50px)')};
 `;
 
 const IconImage = styled.div`
-  width: 56px;
-  height: 56px;
+  width: ${({ $kali }) => ($kali ? '56px' : '56px')};
+  height: ${({ $kali }) => ($kali ? '56px' : '56px')};
   display: flex;
   align-items: center;
   justify-content: center;
-  background: rgba(255, 255, 255, 0.08);
-  backdrop-filter: blur(10px);
-  border-radius: 12px;
-  font-size: 28px;
-  color: #fff;
-  transition: all 0.3s cubic-bezier(0.4, 0, 0.2, 1);
-  box-shadow: 
-    0 2px 8px rgba(0, 0, 0, 0.3),
-    inset 0 1px 0 rgba(255, 255, 255, 0.1);
-  border: 1px solid rgba(255, 255, 255, 0.1);
+  position: relative;
+  background: ${({ $kali, $accent }) => {
+    if ($kali && $accent) return 'transparent';
+    return $kali ? 'rgba(4, 12, 20, 0.9)' : 'rgba(255, 255, 255, 0.08)';
+  }};
+  ${({ $kali, $accent }) =>
+    $kali &&
+    $accent &&
+    `
+    &::after {
+      content: '';
+      position: absolute;
+      inset: 0;
+      border-radius: inherit;
+      background:
+        linear-gradient(165deg, rgba(255, 255, 255, 0.52) 0%, rgba(255, 255, 255, 0.12) 38%, transparent 55%),
+        radial-gradient(ellipse 100% 85% at 30% 16%, ${$accent} 0%, transparent 62%),
+        radial-gradient(ellipse 70% 55% at 72% 78%, rgba(255, 255, 255, 0.14) 0%, transparent 55%),
+        linear-gradient(175deg, rgba(36, 54, 88, 0.99) 0%, rgba(18, 30, 52, 1) 48%, rgba(10, 18, 34, 1) 100%);
+      box-shadow:
+        inset 0 1px 0 rgba(255, 255, 255, 0.32),
+        inset 0 -1px 0 rgba(0, 0, 0, 0.3),
+        inset 0 -10px 22px rgba(0, 0, 0, 0.22);
+      z-index: 0;
+    }
+  `}
+  & > svg {
+    position: relative;
+    z-index: 1;
+    filter: ${({ $kali }) =>
+      $kali
+        ? 'drop-shadow(0 2px 3px rgba(0, 0, 0, 0.45)) drop-shadow(0 0 14px rgba(200, 230, 255, 0.35))'
+        : 'none'};
+  }
+  backdrop-filter: ${({ $kali }) => ($kali ? 'blur(12px) saturate(1.55)' : 'blur(10px)')};
+  border-radius: ${({ $kali }) => ($kali ? '16px' : '12px')};
+  font-size: ${({ $kali }) => ($kali ? '26px' : '28px')};
+  color: ${({ $kali }) => ($kali ? '#ffffff' : '#fff')};
+  transition: transform 0.35s cubic-bezier(0.22, 1, 0.36, 1), box-shadow 0.35s ease;
+  box-shadow: ${({ $kali }) =>
+    $kali
+      ? `0 10px 32px rgba(0, 0, 0, 0.45),
+    0 0 0 1px rgba(255, 255, 255, 0.16),
+    0 0 0 1px rgba(140, 200, 255, 0.28),
+    0 1px 0 rgba(255, 255, 255, 0.14) inset`
+      : `0 2px 8px rgba(0, 0, 0, 0.3),
+    inset 0 1px 0 rgba(255, 255, 255, 0.1)`};
+  border: 1px solid
+    ${({ $kali }) => ($kali ? 'rgba(190, 220, 255, 0.42)' : 'rgba(255, 255, 255, 0.1)')};
+  overflow: hidden;
 `;
 
 const DesktopIcon = styled(motion.div)`
   display: flex;
   flex-direction: column;
   align-items: center;
-  gap: 8px;
+  gap: ${({ $kali }) => ($kali ? '11px' : '8px')};
   cursor: pointer;
-  padding: 12px;
-  border-radius: 8px;
-  transition: all 0.3s cubic-bezier(0.4, 0, 0.2, 1);
+  padding: ${({ $kali }) => ($kali ? '16px 14px 15px' : '12px')};
+  border-radius: ${({ $kali }) => ($kali ? '20px' : '8px')};
+  transition: border-color 0.35s ease, box-shadow 0.35s ease, transform 0.38s cubic-bezier(0.22, 1, 0.36, 1);
   position: relative;
-  
+  width: ${({ $kali }) => ($kali ? '100%' : 'auto')};
+  max-width: ${({ $kali }) => ($kali ? 'min(172px, calc(100% - 4px))' : 'none')};
+  justify-self: ${({ $kali }) => ($kali ? 'stretch' : 'auto')};
+  ${({ $kali }) =>
+    $kali &&
+    css`
+      margin: 0;
+      box-sizing: border-box;
+      border: 1px solid rgba(160, 200, 255, 0.38);
+      background:
+        radial-gradient(ellipse 140% 90% at 50% -18%, rgba(140, 200, 255, 0.28) 0%, transparent 52%),
+        linear-gradient(175deg, rgba(28, 42, 68, 0.82) 0%, rgba(18, 28, 48, 0.68) 45%, rgba(10, 18, 32, 0.58) 100%);
+      backdrop-filter: blur(22px) saturate(160%);
+      box-shadow:
+        0 14px 44px rgba(0, 0, 0, 0.48),
+        0 0 0 1px rgba(255, 255, 255, 0.05) inset,
+        inset 0 -3px 12px rgba(0, 0, 0, 0.28);
+
+      &::after {
+        content: '';
+        position: absolute;
+        top: 0;
+        left: 10%;
+        right: 10%;
+        height: 1px;
+        background: linear-gradient(
+          90deg,
+          transparent,
+          rgba(220, 240, 255, 0.75),
+          rgba(160, 205, 255, 0.45),
+          transparent
+        );
+        border-radius: 2px;
+        opacity: 0.9;
+        pointer-events: none;
+      }
+    `}
+
   &::before {
     content: '';
     position: absolute;
     inset: 0;
-    background: rgba(255, 255, 255, 0.05);
-    border-radius: 8px;
-    opacity: 0;
-    transition: opacity 0.3s;
+    border-radius: inherit;
+    ${({ $kali }) =>
+      $kali
+        ? css`
+            background: linear-gradient(145deg, rgba(150, 210, 255, 0.18) 0%, transparent 52%);
+            opacity: 1;
+          `
+        : css`
+            background: rgba(255, 255, 255, 0.05);
+            border-radius: 8px;
+            opacity: 0;
+          `}
+    transition: opacity 0.35s ease;
+    pointer-events: none;
   }
-  
+
   &:hover {
-    transform: translateY(-2px);
-    
+    transform: ${({ $kali }) => ($kali ? 'translateY(-4px)' : 'translateY(-2px)')};
+
     &::before {
       opacity: 1;
     }
-    
-    ${IconImage} {
-      background: rgba(255, 255, 255, 0.2);
-      box-shadow: 0 4px 12px rgba(0, 255, 65, 0.3);
-      transform: scale(1.1);
-    }
+
+    ${({ $kali }) =>
+      $kali &&
+      css`
+        border-color: rgba(190, 225, 255, 0.55);
+        box-shadow:
+          0 22px 56px rgba(0, 0, 0, 0.48),
+          0 0 0 1px rgba(170, 215, 255, 0.28),
+          0 0 52px rgba(120, 185, 255, 0.28),
+          inset 0 1px 0 rgba(255, 255, 255, 0.18);
+
+        &::before {
+          background: linear-gradient(145deg, rgba(180, 220, 255, 0.24) 0%, transparent 58%);
+        }
+      `}
   }
+
+  ${({ $kali }) =>
+    $kali
+      ? css`
+          &:hover ${IconImage} {
+            transform: scale(1.06) translateY(-2px);
+            box-shadow:
+              0 16px 42px rgba(0, 0, 0, 0.5),
+              0 0 0 1px rgba(200, 230, 255, 0.42),
+              0 0 48px rgba(140, 200, 255, 0.38);
+          }
+        `
+      : css`
+          &:hover ${IconImage} {
+            background: rgba(255, 255, 255, 0.2);
+            box-shadow: 0 4px 12px rgba(0, 255, 65, 0.3);
+            transform: scale(1.1);
+          }
+        `}
 `;
 
 const IconLabel = styled.span`
-  color: #fff;
-  font-size: 11px;
-  font-weight: 500;
+  color: ${({ $kali }) => ($kali ? '#f4f9ff' : '#fff')};
+  font-size: ${({ $kali }) => ($kali ? '10px' : '11px')};
+  font-weight: ${({ $kali }) => ($kali ? '600' : '500')};
+  letter-spacing: ${({ $kali }) => ($kali ? '0.06em' : 'normal')};
+  text-transform: ${({ $kali }) => ($kali ? 'uppercase' : 'none')};
+  font-family: ${({ $kali }) =>
+    $kali ? `'Share Tech Mono', ui-monospace, monospace` : 'inherit'};
   text-align: center;
-  text-shadow: 
-    0 1px 2px rgba(0, 0, 0, 0.8),
-    0 0 8px rgba(0, 0, 0, 0.5);
-  max-width: 80px;
-  line-height: 1.2;
+  ${({ $kali }) =>
+    $kali &&
+    css`
+      text-shadow:
+        0 1px 3px rgba(0, 0, 0, 0.65),
+        0 0 22px rgba(160, 210, 255, 0.45);
+    `}
+  ${({ $kali }) =>
+    !$kali &&
+    css`
+      text-shadow:
+        0 1px 2px rgba(0, 0, 0, 0.8),
+        0 0 8px rgba(0, 0, 0, 0.5);
+    `}
+  max-width: ${({ $kali }) => ($kali ? '100%' : '80px')};
+  line-height: ${({ $kali }) => ($kali ? '1.3' : '1.2')};
+  word-wrap: break-word;
+  overflow-wrap: break-word;
 `;
 
 const Taskbar = styled.div`
   position: absolute;
-  bottom: 0;
+  top: ${({ $kali }) => ($kali ? '0' : 'auto')};
+  bottom: ${({ $kali }) => ($kali ? 'auto' : '0')};
   left: 0;
   right: 0;
   height: 48px;
   background: linear-gradient(180deg, 
-    rgba(0, 0, 0, 0.95) 0%, 
-    rgba(0, 0, 0, 0.9) 100%);
+    ${({ $kali }) => ($kali ? 'rgba(9, 14, 22, 0.96)' : 'rgba(0, 0, 0, 0.95)')} 0%, 
+    ${({ $kali }) => ($kali ? 'rgba(10, 18, 30, 0.94)' : 'rgba(0, 0, 0, 0.9)')} 100%);
   backdrop-filter: blur(20px) saturate(180%);
   display: flex;
   align-items: center;
   padding: 0 12px;
   gap: 6px;
   z-index: 100;
-  border-top: 1px solid rgba(255, 255, 255, 0.1);
+  border-top: ${({ $kali }) => ($kali ? 'none' : '1px solid rgba(255, 255, 255, 0.1)')};
+  border-bottom: ${({ $kali }) => ($kali ? '1px solid rgba(124, 158, 205, 0.18)' : 'none')};
   box-shadow: 
-    0 -2px 10px rgba(0, 0, 0, 0.5),
+    ${({ $kali }) => ($kali ? '0 2px 10px rgba(0, 0, 0, 0.4)' : '0 -2px 10px rgba(0, 0, 0, 0.5)')},
     inset 0 1px 0 rgba(255, 255, 255, 0.05);
 `;
 
 const StartButton = styled(motion.button)`
-  background: linear-gradient(135deg, #0078d4 0%, #005a9e 100%);
-  border: none;
+  background: ${({ $kali }) => ($kali ? 'rgba(18, 31, 51, 0.95)' : 'linear-gradient(135deg, #0078d4 0%, #005a9e 100%)')};
+  border: ${({ $kali }) => ($kali ? '1px solid rgba(130, 165, 215, 0.28)' : 'none')};
   border-radius: 6px;
   padding: 10px 18px;
-  color: #fff;
+  color: ${({ $kali }) => ($kali ? '#dce9ff' : '#fff')};
   font-weight: 600;
   cursor: pointer;
   display: flex;
@@ -326,14 +846,14 @@ const StartButton = styled(motion.button)`
   gap: 8px;
   font-size: 13px;
   box-shadow: 
-    0 2px 8px rgba(0, 120, 212, 0.4),
+    ${({ $kali }) => ($kali ? '0 2px 8px rgba(0, 0, 0, 0.24)' : '0 2px 8px rgba(0, 120, 212, 0.4)')},
     inset 0 1px 0 rgba(255, 255, 255, 0.2);
   transition: all 0.2s cubic-bezier(0.4, 0, 0.2, 1);
   
   &:hover {
-    background: linear-gradient(135deg, #0088e4 0%, #006aae 100%);
+    background: ${({ $kali }) => ($kali ? 'rgba(26, 44, 72, 0.98)' : 'linear-gradient(135deg, #0088e4 0%, #006aae 100%)')};
     box-shadow: 
-      0 4px 12px rgba(0, 120, 212, 0.6),
+      ${({ $kali }) => ($kali ? '0 4px 12px rgba(0, 0, 0, 0.28)' : '0 4px 12px rgba(0, 120, 212, 0.6)')},
       inset 0 1px 0 rgba(255, 255, 255, 0.3);
     transform: translateY(-1px);
   }
@@ -347,10 +867,12 @@ const StartButton = styled(motion.button)`
 `;
 
 const TaskbarIcon = styled(motion.button)`
-  background: ${props => props.$active ? 'rgba(255, 255, 255, 0.15)' : 'transparent'};
+  background: ${props => props.$active
+    ? (props.$kali ? 'rgba(104, 141, 199, 0.16)' : 'rgba(255, 255, 255, 0.15)')
+    : 'transparent'};
   border: none;
   padding: 8px 14px;
-  color: #fff;
+  color: ${props => props.$kali ? '#dce9ff' : '#fff'};
   cursor: pointer;
   border-radius: 6px;
   display: flex;
@@ -359,10 +881,12 @@ const TaskbarIcon = styled(motion.button)`
   font-size: 18px;
   transition: all 0.2s cubic-bezier(0.4, 0, 0.2, 1);
   position: relative;
-  border-bottom: ${props => props.$active ? '2px solid #0078d4' : '2px solid transparent'};
+  border-bottom: ${props => props.$active ? (props.$kali ? '2px solid #5fa8ff' : '2px solid #0078d4') : '2px solid transparent'};
   
   &:hover {
-    background: ${props => props.$active ? 'rgba(255, 255, 255, 0.2)' : 'rgba(255, 255, 255, 0.1)'};
+    background: ${props => props.$active
+      ? (props.$kali ? 'rgba(104, 141, 199, 0.22)' : 'rgba(255, 255, 255, 0.2)')
+      : (props.$kali ? 'rgba(255, 255, 255, 0.06)' : 'rgba(255, 255, 255, 0.1)')};
     transform: translateY(-1px);
   }
   
@@ -374,7 +898,7 @@ const TaskbarIcon = styled(motion.button)`
     transform: translateX(-50%);
     width: ${props => props.$active ? '80%' : '0%'};
     height: 2px;
-    background: #0078d4;
+    background: ${props => props.$kali ? '#5fa8ff' : '#0078d4'};
     transition: width 0.2s;
   }
 `;
@@ -384,21 +908,22 @@ const SystemTray = styled.div`
   display: flex;
   align-items: center;
   gap: 10px;
-  color: #fff;
+  color: ${({ $kali }) => ($kali ? '#dce9ff' : '#fff')};
   font-size: 12px;
 `;
 
 const StartMenu = styled(motion.div)`
   position: fixed;
-  bottom: 48px;
+  bottom: ${({ $kali }) => ($kali ? 'auto' : '48px')};
+  top: ${({ $kali }) => ($kali ? '48px' : 'auto')};
   left: 0;
   width: 350px;
   max-height: 500px;
   background: linear-gradient(180deg, 
-    rgba(30, 30, 40, 0.98) 0%, 
-    rgba(20, 20, 30, 0.98) 100%);
+    ${({ $kali }) => ($kali ? 'rgba(11, 18, 29, 0.98)' : 'rgba(30, 30, 40, 0.98)')} 0%, 
+    ${({ $kali }) => ($kali ? 'rgba(7, 12, 22, 0.98)' : 'rgba(20, 20, 30, 0.98)')} 100%);
   backdrop-filter: blur(20px) saturate(180%);
-  border-radius: 8px 8px 0 0;
+  border-radius: ${({ $kali }) => ($kali ? '0 0 10px 10px' : '8px 8px 0 0')};
   box-shadow: 
     0 -4px 20px rgba(0, 0, 0, 0.6),
     0 0 0 1px rgba(255, 255, 255, 0.1),
@@ -411,12 +936,12 @@ const StartMenu = styled(motion.div)`
 
 const StartMenuHeader = styled.div`
   padding: 20px;
-  border-bottom: 1px solid rgba(255, 255, 255, 0.1);
-  background: linear-gradient(180deg, rgba(0, 120, 212, 0.2) 0%, transparent 100%);
+  border-bottom: 1px solid ${({ $kali }) => ($kali ? 'rgba(130, 165, 215, 0.16)' : 'rgba(255, 255, 255, 0.1)')};
+  background: ${({ $kali }) => ($kali ? 'linear-gradient(180deg, rgba(95, 168, 255, 0.12) 0%, transparent 100%)' : 'linear-gradient(180deg, rgba(0, 120, 212, 0.2) 0%, transparent 100%)')};
 `;
 
 const StartMenuTitle = styled.h3`
-  color: #fff;
+  color: ${({ $kali }) => ($kali ? '#e6f0ff' : '#fff')};
   font-size: 18px;
   font-weight: 600;
   margin: 0;
@@ -458,12 +983,12 @@ const StartMenuItem = styled(motion.div)`
   padding: 12px 15px;
   border-radius: 6px;
   cursor: pointer;
-  color: #fff;
+  color: ${({ $kali }) => ($kali ? '#dce9ff' : '#fff')};
   transition: all 0.2s;
   position: relative;
   
   &:hover {
-    background: rgba(255, 255, 255, 0.1);
+    background: ${({ $kali }) => ($kali ? 'rgba(95, 168, 255, 0.08)' : 'rgba(255, 255, 255, 0.1)')};
     transform: translateX(5px);
   }
   
@@ -491,15 +1016,91 @@ const StartMenuLabel = styled.span`
   flex: 1;
 `;
 
+const DesktopHeader = styled.div`
+  position: absolute;
+  top: ${({ $kali }) => ($kali ? '58px' : '20px')};
+  right: 24px;
+  z-index: 3;
+  display: ${({ $kali }) => ($kali ? 'flex' : 'none')};
+  flex-direction: column;
+  align-items: flex-end;
+  gap: 6px;
+  color: #dce9ff;
+  text-align: right;
+`;
+
+const DesktopHeaderTitle = styled.div`
+  font-family: 'Orbitron', sans-serif;
+  font-size: 1.05rem;
+  letter-spacing: 0.08em;
+  color: #8be9fd;
+`;
+
+const DesktopHeaderMeta = styled.div`
+  font-size: 0.72rem;
+  color: #8ea6cb;
+  line-height: 1.45;
+  max-width: 280px;
+`;
+
+const MissionBanner = styled.div`
+  position: absolute;
+  top: ${({ $kali }) => ($kali ? '58px' : '20px')};
+  left: 16px;
+  max-width: min(440px, calc(100% - 32px));
+  z-index: 4;
+  padding: 12px 14px;
+  border-radius: 10px;
+  background: linear-gradient(145deg, rgba(8, 18, 32, 0.96) 0%, rgba(12, 22, 38, 0.94) 100%);
+  border: 1px solid rgba(95, 168, 255, 0.28);
+  box-shadow: 0 8px 28px rgba(0, 0, 0, 0.45);
+  font-size: 0.72rem;
+  line-height: 1.45;
+  color: #c8daf5;
+  font-family: 'Share Tech Mono', ui-monospace, monospace;
+`;
+
+const MissionBannerTitle = styled.div`
+  font-family: 'Orbitron', sans-serif;
+  font-size: 0.78rem;
+  letter-spacing: 0.06em;
+  color: #8be9fd;
+  margin-bottom: 8px;
+`;
+
+const MissionBannerPhase = styled.div`
+  font-size: 0.68rem;
+  color: #7f93b4;
+  margin-top: 8px;
+  &:first-of-type {
+    margin-top: 0;
+  }
+`;
+
+const MissionBannerToggle = styled.button`
+  margin-top: 8px;
+  padding: 4px 10px;
+  font-size: 0.65rem;
+  cursor: pointer;
+  border-radius: 6px;
+  border: 1px solid rgba(95, 168, 255, 0.35);
+  background: rgba(18, 31, 51, 0.85);
+  color: #dce9ff;
+  font-family: inherit;
+  &:hover {
+    background: rgba(26, 44, 72, 0.95);
+  }
+`;
+
 const Window = styled(motion.div)`
   position: ${props => props.$maximized ? 'fixed' : 'absolute'};
-  top: ${props => props.$maximized ? '0' : props.y + 'px'};
+  top: ${props => props.$maximized ? (props.$kali ? '48px' : '0') : props.y + 'px'};
   left: ${props => props.$maximized ? '0' : props.x + 'px'};
   width: ${props => props.$maximized ? '100%' : props.$minimized ? '0' : '600px'};
-  height: ${props => props.$maximized ? 'calc(100% - 40px)' : props.$minimized ? '0' : '400px'};
-  background: #f0f0f0;
+  height: ${props => props.$maximized ? 'calc(100% - 48px)' : props.$minimized ? '0' : '400px'};
+  background: ${props => props.$kali ? '#101722' : '#f0f0f0'};
   border-radius: ${props => props.$maximized ? '0' : '8px'};
-  box-shadow: 0 10px 40px rgba(0, 0, 0, 0.3);
+  box-shadow: ${props => props.$kali ? '0 16px 40px rgba(0, 0, 0, 0.45), 0 0 0 1px rgba(124, 158, 205, 0.12)' : '0 10px 40px rgba(0, 0, 0, 0.3)'};
   display: ${props => props.$minimized ? 'none' : 'flex'};
   flex-direction: column;
   z-index: ${props => props.$selected ? 20 : 10};
@@ -507,7 +1108,7 @@ const Window = styled(motion.div)`
 `;
 
 const WindowHeader = styled.div`
-  background: linear-gradient(135deg, #0078d4 0%, #005a9e 100%);
+  background: ${({ $kali }) => ($kali ? 'linear-gradient(135deg, #162235 0%, #0f1725 100%)' : 'linear-gradient(135deg, #0078d4 0%, #005a9e 100%)')};
   padding: 8px 12px;
   display: flex;
   align-items: center;
@@ -516,7 +1117,7 @@ const WindowHeader = styled.div`
 `;
 
 const WindowTitle = styled.div`
-  color: #fff;
+  color: ${({ $kali }) => ($kali ? '#e6f0ff' : '#fff')};
   font-weight: bold;
   font-size: 14px;
   display: flex;
@@ -532,13 +1133,13 @@ const WindowControls = styled.div`
 const WindowButton = styled.button`
   background: transparent;
   border: none;
-  color: #fff;
+  color: ${({ $kali }) => ($kali ? '#dce9ff' : '#fff')};
   cursor: pointer;
   padding: 4px 8px;
   border-radius: 3px;
   
   &:hover {
-    background: rgba(255, 255, 255, 0.2);
+    background: ${({ $kali }) => ($kali ? 'rgba(255, 255, 255, 0.08)' : 'rgba(255, 255, 255, 0.2)')};
   }
 `;
 
@@ -546,7 +1147,8 @@ const WindowContent = styled.div`
   flex: 1;
   padding: 20px;
   overflow: auto;
-  background: #fff;
+  background: ${({ $kali }) => ($kali ? '#111826' : '#fff')};
+  color: ${({ $kali }) => ($kali ? '#d7e4f8' : 'inherit')};
 `;
 
 const KeyboardArea = styled.div`
@@ -565,6 +1167,9 @@ const KeyboardArea = styled.div`
     inset 0 2px 10px rgba(0, 0, 0, 0.8),
     0 0 0 1px rgba(0, 255, 65, 0.1),
     0 4px 20px rgba(0, 0, 0, 0.6);
+  transform: ${props => (props.$compactKeyboard ? 'scaleY(0.5)' : 'none')};
+  transform-origin: top center;
+  margin-bottom: ${props => (props.$compactKeyboard ? '-120px' : '0')};
   
   &::before {
     content: '';
@@ -904,7 +1509,357 @@ const InfoText = styled.p`
   flex: 1;
 `;
 
-const LaptopInterface = ({ device }) => {
+/** Simulated Linux VFS (terminal + file explorer) */
+function createInitialSimFs() {
+  const fs = {
+    '/': { dirs: ['home', 'etc', 'usr', 'var'], files: [] },
+    '/home': { dirs: ['kali'], files: [] },
+    '/home/kali': {
+      dirs: ['Desktop', 'Documents', 'Downloads', 'Music', 'Pictures', 'Videos', 'tools', 'scripts', 'mitm-tools'],
+      files: ['.bashrc', 'notes.txt']
+    }
+  };
+  fs['/home/kali'].dirs.forEach((d) => {
+    fs[`/home/kali/${d}`] = { dirs: [], files: [] };
+  });
+  return fs;
+}
+
+const INITIAL_SIM_FILE_CONTENTS = {
+  '/home/kali/.bashrc': '# ~/.bashrc (simulation only)\nexport HISTSIZE=1000',
+  '/home/kali/notes.txt': 'Lab notes — simulation. Try: mkdir test, cd test, touch a.txt, ls -la, rm a.txt'
+};
+
+function cloneSimFs(fs) {
+  const next = {};
+  Object.keys(fs).forEach((k) => {
+    next[k] = { dirs: [...fs[k].dirs], files: [...fs[k].files] };
+  });
+  return next;
+}
+
+function dirnamePath(p) {
+  const parts = p.split('/').filter(Boolean);
+  parts.pop();
+  return parts.length ? `/${parts.join('/')}` : '/';
+}
+
+function basenamePath(p) {
+  const parts = p.split('/').filter(Boolean);
+  return parts.length ? parts[parts.length - 1] : '';
+}
+
+function resolveLinuxPath(cwd, raw) {
+  if (!raw || raw === '~') return '/home/kali';
+  let p = raw.replace(/^~\//, '/home/kali/');
+  if (p === '~') return '/home/kali';
+  const combined = p.startsWith('/') ? p : `${cwd.replace(/\/$/, '')}/${p}`;
+  const segments = combined.split('/').filter(Boolean);
+  const stack = [];
+  for (const seg of segments) {
+    if (seg === '.') continue;
+    if (seg === '..') stack.pop();
+    else stack.push(seg);
+  }
+  return `/${stack.join('/')}`;
+}
+
+function formatTerminalPrompt(cwd) {
+  const home = '/home/kali';
+  const c = (cwd || '/').replace(/\/$/, '') || '/';
+  if (c === home) return 'kali@hacker-laptop:~$';
+  if (c.startsWith(`${home}/`)) {
+    return `kali@hacker-laptop:~${c.slice(home.length)}$`;
+  }
+  return `kali@hacker-laptop:${c}$`;
+}
+
+function applyLinuxVfsCommand(cmd, parts, fsIn, cwdIn, fileContentsIn) {
+  if (!parts.length) {
+    return { handled: false, fs: fsIn, cwd: cwdIn, files: fileContentsIn, output: '' };
+  }
+  const prog = parts[0].toLowerCase();
+  const fs = cloneSimFs(fsIn);
+  let cwd = cwdIn;
+  const files = { ...fileContentsIn };
+  let output = '';
+
+  if (prog === 'pwd') {
+    return { handled: true, fs, cwd, files, output: cwd };
+  }
+
+  if (prog === 'cd') {
+    const raw = parts.slice(1).join(' ') || '/home/kali';
+    const dest = resolveLinuxPath(cwd, raw.trim());
+    if (!fs[dest]) {
+      output = `-bash: cd: ${parts[1] || raw}: No such file or directory`;
+      return { handled: true, fs, cwd, files, output };
+    }
+    return { handled: true, fs, cwd: dest, files, output: '' };
+  }
+
+  if (prog === 'ls') {
+    const flags = parts.filter((p) => p.startsWith('-')).join('');
+    const pathArg = parts.slice(1).find((p) => !p.startsWith('-'));
+    const listPath = pathArg ? resolveLinuxPath(cwd, pathArg) : cwd;
+    if (!fs[listPath]) {
+      output = `ls: cannot access '${pathArg || listPath}': No such file or directory`;
+      return { handled: true, fs, cwd, files, output };
+    }
+    const { dirs, files: fls } = fs[listPath];
+    const showHidden = flags.includes('a');
+    let dList = showHidden ? [...dirs] : dirs.filter((d) => !d.startsWith('.'));
+    let fList = showHidden ? [...fls] : fls.filter((f) => !f.startsWith('.'));
+    dList.sort();
+    fList.sort();
+    if (flags.includes('l')) {
+      const rows = ['total 0'];
+      dList.forEach((d) => {
+        rows.push(`drwxr-xr-x  2 kali kali  4096 Jan 15 08:00 ${d}`);
+      });
+      fList.forEach((f) => {
+        rows.push(`-rw-r--r--  1 kali kali  4096 Jan 15 08:00 ${f}`);
+      });
+      output = rows.join('\n');
+    } else {
+      output = [...dList.map((d) => `${d}/`), ...fList].join('  ') || '(empty)';
+    }
+    return { handled: true, fs, cwd, files, output };
+  }
+
+  if (prog === 'mkdir') {
+    const name = parts[1];
+    if (!name) {
+      output = 'mkdir: missing operand';
+      return { handled: true, fs, cwd, files, output };
+    }
+    const newPath = resolveLinuxPath(cwd, name);
+    const parent = dirnamePath(newPath);
+    const base = basenamePath(newPath);
+    if (fs[newPath]) {
+      output = `mkdir: cannot create directory '${name}': File exists`;
+      return { handled: true, fs, cwd, files, output };
+    }
+    if (!fs[parent]) {
+      output = `mkdir: cannot create directory '${name}': No such file or directory`;
+      return { handled: true, fs, cwd, files, output };
+    }
+    if (fs[parent].files.includes(base)) {
+      output = `mkdir: cannot create directory '${name}': File exists`;
+      return { handled: true, fs, cwd, files, output };
+    }
+    fs[parent].dirs.push(base);
+    fs[newPath] = { dirs: [], files: [] };
+    return { handled: true, fs, cwd, files, output: '' };
+  }
+
+  if (prog === 'touch') {
+    const name = parts[1];
+    if (!name) {
+      output = 'touch: missing file operand';
+      return { handled: true, fs, cwd, files, output };
+    }
+    const fp = resolveLinuxPath(cwd, name);
+    const parent = dirnamePath(fp);
+    const base = basenamePath(fp);
+    if (!fs[parent]) {
+      output = `touch: cannot touch '${name}': No such file or directory`;
+      return { handled: true, fs, cwd, files, output };
+    }
+    if (fs[parent].dirs.includes(base) || base === '.' || base === '..') {
+      output = `touch: cannot touch '${name}': Is a directory`;
+      return { handled: true, fs, cwd, files, output };
+    }
+    if (!fs[parent].files.includes(base)) {
+      fs[parent].files.push(base);
+      if (files[fp] === undefined) files[fp] = '';
+    }
+    return { handled: true, fs, cwd, files, output: '' };
+  }
+
+  if (prog === 'rm') {
+    const recursive = parts.some((p) => p === '-r' || p === '-rf' || p === '-R');
+    const targets = parts.slice(1).filter((p) => !p.startsWith('-'));
+    if (!targets.length) {
+      output = 'rm: missing operand';
+      return { handled: true, fs, cwd, files, output };
+    }
+    const name = targets[0];
+    const fp = resolveLinuxPath(cwd, name);
+    const parent = dirnamePath(fp);
+    const base = basenamePath(fp);
+    const node = fs[parent];
+    if (!node) {
+      output = `rm: cannot remove '${name}': No such file or directory`;
+      return { handled: true, fs, cwd, files, output };
+    }
+    if (node.files.includes(base)) {
+      node.files = node.files.filter((f) => f !== base);
+      delete files[fp];
+      return { handled: true, fs, cwd, files, output: '' };
+    }
+    if (node.dirs.includes(base)) {
+      if (!recursive) {
+        output = `rm: cannot remove '${name}': Is a directory`;
+        return { handled: true, fs, cwd, files, output };
+      }
+      node.dirs = node.dirs.filter((d) => d !== base);
+      Object.keys(fs).forEach((k) => {
+        if (k === fp || k.startsWith(`${fp}/`)) delete fs[k];
+      });
+      Object.keys(files).forEach((k) => {
+        if (k === fp || k.startsWith(`${fp}/`)) delete files[k];
+      });
+      return { handled: true, fs, cwd, files, output: '' };
+    }
+    output = `rm: cannot remove '${name}': No such file or directory`;
+    return { handled: true, fs, cwd, files, output };
+  }
+
+  if (prog === 'rmdir') {
+    const name = parts[1];
+    if (!name) {
+      output = 'rmdir: missing operand';
+      return { handled: true, fs, cwd, files, output };
+    }
+    const fp = resolveLinuxPath(cwd, name);
+    const parent = dirnamePath(fp);
+    const base = basenamePath(fp);
+    const node = fs[parent];
+    if (!node || !node.dirs.includes(base)) {
+      output = `rmdir: failed to remove '${name}': No such file or directory`;
+      return { handled: true, fs, cwd, files, output };
+    }
+    const sub = fs[fp];
+    if (sub && (sub.dirs.length || sub.files.length)) {
+      output = `rmdir: failed to remove '${name}': Directory not empty`;
+      return { handled: true, fs, cwd, files, output };
+    }
+    node.dirs = node.dirs.filter((d) => d !== base);
+    delete fs[fp];
+    return { handled: true, fs, cwd, files, output: '' };
+  }
+
+  if (prog === 'mv') {
+    const from = parts[1];
+    const to = parts[2];
+    if (!from || !to) {
+      output = 'mv: missing file operand';
+      return { handled: true, fs, cwd, files, output };
+    }
+    const src = resolveLinuxPath(cwd, from);
+    const dst = resolveLinuxPath(cwd, to);
+    const sp = dirnamePath(src);
+    const sb = basenamePath(src);
+    const dp = dirnamePath(dst);
+    const db = basenamePath(dst);
+    const sNode = fs[sp];
+    if (!sNode || (!sNode.files.includes(sb) && !sNode.dirs.includes(sb))) {
+      output = `mv: cannot stat '${from}': No such file or directory`;
+      return { handled: true, fs, cwd, files, output };
+    }
+    if (!fs[dp]) {
+      output = `mv: cannot move to '${to}': No such file or directory`;
+      return { handled: true, fs, cwd, files, output };
+    }
+    if (sNode.files.includes(sb)) {
+      sNode.files = sNode.files.filter((f) => f !== sb);
+      if (!fs[dp].files.includes(db)) fs[dp].files.push(db);
+      if (files[src] !== undefined) {
+        files[dst] = files[src];
+        delete files[src];
+      }
+      return { handled: true, fs, cwd, files, output: '' };
+    }
+    sNode.dirs = sNode.dirs.filter((d) => d !== sb);
+    const sub = fs[src];
+    if (sub && (sub.dirs.length || sub.files.length)) {
+      sNode.dirs.push(sb);
+      output = `mv: cannot move '${from}': Directory not empty`;
+      return { handled: true, fs, cwd, files, output };
+    }
+    if (!fs[dp].dirs.includes(db)) fs[dp].dirs.push(db);
+    delete fs[src];
+    fs[dst] = { dirs: [], files: [] };
+    return { handled: true, fs, cwd, files, output: '' };
+  }
+
+  if (prog === 'cp') {
+    const recursive = parts.includes('-r') || parts.includes('-R');
+    const rest = parts.slice(1).filter((p) => !p.startsWith('-'));
+    const from = rest[0];
+    const to = rest[1];
+    if (!from || !to) {
+      output = 'cp: missing file operand';
+      return { handled: true, fs, cwd, files, output };
+    }
+    const src = resolveLinuxPath(cwd, from);
+    const dst = resolveLinuxPath(cwd, to);
+    const sp = dirnamePath(src);
+    const sb = basenamePath(src);
+    const sNode = fs[sp];
+    if (!sNode || !sNode.files.includes(sb)) {
+      if (fs[src] && recursive) {
+        output = 'cp: (simulation) recursive directory copy not fully implemented';
+        return { handled: true, fs, cwd, files, output };
+      }
+      return { handled: false, fs: fsIn, cwd: cwdIn, files: fileContentsIn, output: '' };
+    }
+    const dp = dirnamePath(dst);
+    const db = basenamePath(dst);
+    if (!fs[dp]) {
+      output = `cp: cannot create regular file '${to}': No such file or directory`;
+      return { handled: true, fs, cwd, files, output };
+    }
+    if (!fs[dp].files.includes(db)) fs[dp].files.push(db);
+    files[dst] = files[src] !== undefined ? files[src] : '';
+    return { handled: true, fs, cwd, files, output: '' };
+  }
+
+  if (prog === 'cat') {
+    const name = parts.slice(1).join(' ') || '';
+    if (!name) {
+      output = 'cat: missing operand';
+      return { handled: true, fs, cwd, files, output };
+    }
+    const fp = resolveLinuxPath(cwd, name);
+    const parent = dirnamePath(fp);
+    const base = basenamePath(fp);
+    const node = fs[parent];
+    if (!node || !node.files.includes(base)) {
+      return { handled: false, fs: fsIn, cwd: cwdIn, files: fileContentsIn, output: '' };
+    }
+    output = files[fp] !== undefined ? files[fp] : '';
+    return { handled: true, fs, cwd, files, output };
+  }
+
+  if (prog === 'uname') {
+    output = parts.includes('-a')
+      ? 'Linux kali-rolling 6.6.15-amd64 #1 SMP PREEMPT Debian 6.6.15-2kali1 (2024-05-01) x86_64 GNU/Linux'
+      : 'Linux';
+    return { handled: true, fs, cwd, files, output };
+  }
+
+  if (prog === 'hostname') {
+    output = 'kali-rolling';
+    return { handled: true, fs, cwd, files, output };
+  }
+
+  if (prog === 'echo') {
+    output = parts.slice(1).join(' ');
+    return { handled: true, fs, cwd, files, output };
+  }
+
+  return { handled: false, fs: fsIn, cwd: cwdIn, files: fileContentsIn, output: '' };
+}
+
+const LaptopInterface = ({
+  device,
+  compactKeyboard = false,
+  hideKeyboard = false,
+  uiVariant = 'kali',
+  missionId = null
+}) => {
   const { gameState, dispatch } = useGame();
   const [terminalHistory, setTerminalHistory] = useState([
     { type: 'output', text: 'Kali Linux 2023.4 (kali-rolling) tty1' },
@@ -928,6 +1883,7 @@ const LaptopInterface = ({ device }) => {
   
   // MitM Mission State
   const [mitmState, setMitmState] = useState({
+    mission1Phase1: { ...INITIAL_MISSION1_PHASE1 },
     toolsInstalled: false,
     monitorMode: false,
     rogueAPRunning: false,
@@ -939,7 +1895,31 @@ const LaptopInterface = ({ device }) => {
     connectedDevices: [],
     capturedPackets: 0
   });
+  const mitmStateRef = useRef(mitmState);
+  useEffect(() => {
+    mitmStateRef.current = mitmState;
+  }, [mitmState]);
+  const missionIntroShownRef = useRef(false);
+  const mission1CompleteShownRef = useRef(false);
+  const [missionBannerCollapsed, setMissionBannerCollapsed] = useState(false);
   const [showCapturedDataModal, setShowCapturedDataModal] = useState(false);
+
+  const [simulatedFs, setSimulatedFs] = useState(createInitialSimFs);
+  const [simulatedCwd, setSimulatedCwd] = useState('/home/kali');
+  const [simulatedFileContents, setSimulatedFileContents] = useState(() => ({ ...INITIAL_SIM_FILE_CONTENTS }));
+
+  const simulatedFsRef = useRef(simulatedFs);
+  const simulatedCwdRef = useRef(simulatedCwd);
+  const simulatedFileContentsRef = useRef(simulatedFileContents);
+  useEffect(() => {
+    simulatedFsRef.current = simulatedFs;
+  }, [simulatedFs]);
+  useEffect(() => {
+    simulatedCwdRef.current = simulatedCwd;
+  }, [simulatedCwd]);
+  useEffect(() => {
+    simulatedFileContentsRef.current = simulatedFileContents;
+  }, [simulatedFileContents]);
 
   // Auto-scroll terminal to bottom when new output is added
   useEffect(() => {
@@ -948,44 +1928,98 @@ const LaptopInterface = ({ device }) => {
     }
   }, [terminalHistory]);
 
+  useEffect(() => {
+    if (missionId !== 1) return;
+    if (missionIntroShownRef.current) return;
+    missionIntroShownRef.current = true;
+    setTerminalHistory((prev) => [
+      ...prev,
+      {
+        type: 'output',
+        text:
+          '--- Mission 1: MitM on Public WiFi (authorized pentest) ---\n' +
+          'Team router is offline — you must join CafeFreeNet to reach your targets.\n' +
+          'Phase 1: Harden this host (VPN, firewall, DNS, MAC, audit). Phase 2 unlocks the attack chain.\n' +
+          'Commands:   mission status   |   help   |   status'
+      }
+    ]);
+  }, [missionId]);
+
+  useEffect(() => {
+    if (missionId !== 1) return;
+    if (!isMission1Phase1Complete(mitmState.mission1Phase1)) return;
+    if (mitmState.capturedPackets < 1 || !mitmState.sniffing) return;
+    if (mission1CompleteShownRef.current) return;
+    mission1CompleteShownRef.current = true;
+    if (typeof window !== 'undefined') {
+      window.alert(
+        'Mission 1 complete: You hardened on public WiFi, then operated as the MITM and captured traffic. ' +
+          'Only use these techniques in authorized tests.'
+      );
+    }
+  }, [missionId, mitmState]);
+
   const laptopDevice = gameState.devices.laptop;
   const isPowered = laptopDevice.powered;
   const isConnected = laptopDevice.connected;
   const battery = laptopDevice.battery;
+  const isKaliUi = uiVariant === 'kali';
 
-  const desktopApps = [
-    // First Column
-    { id: 'explorer', name: 'File Explorer', icon: FaFolder, color: '#0078d4' },
-    { id: 'browser', name: 'Browser', icon: FaChrome, color: '#4285f4' },
-    { id: 'terminal', name: 'Terminal', icon: FaTerminal, color: '#00ff41' },
-    { id: 'settings', name: 'Settings', icon: FaCog, color: '#888' },
-    { id: 'notepad', name: 'Notepad', icon: FaFileAlt, color: '#ffff00' },
-    // Second Column (starting with Calculator)
-    { id: 'calculator', name: 'Calculator', icon: FaCalculator, color: '#ff6600' },
-    { id: 'paint', name: 'Paint', icon: FaPaintBrush, color: '#ff00ff' },
-    { id: 'images', name: 'Pictures', icon: FaImage, color: '#00ffff' },
-    { id: 'music', name: 'Music', icon: FaMusic, color: '#ff0080' },
-    { id: 'videos', name: 'Videos', icon: FaVideo, color: '#8000ff' },
-    { id: 'games', name: 'Games', icon: FaGamepad, color: '#ff8000' },
-    // Third Column
-    { id: 'downloads', name: 'Downloads', icon: FaDownload, color: '#00d2d3' },
-    { id: 'email', name: 'Email', icon: FaEnvelope, color: '#00a8ff' },
-    { id: 'calendar', name: 'Calendar', icon: FaCalendar, color: '#ff4757' },
-    { id: 'clock', name: 'Clock', icon: FaClock, color: '#5f27cd' },
-    { id: 'camera', name: 'Camera', icon: FaCamera, color: '#00d2d3' },
-    { id: 'headphones', name: 'Audio', icon: FaHeadphones, color: '#ff6348' },
-    { id: 'book', name: 'Books', icon: FaBook, color: '#ff9ff3' },
-    { id: 'chart', name: 'Analytics', icon: FaChartLine, color: '#54a0ff' },
-    { id: 'cloud', name: 'Cloud', icon: FaCloud, color: '#48dbfb' },
-    { id: 'key', name: 'Password', icon: FaKey, color: '#ffd32a' },
-    { id: 'code', name: 'Code Editor', icon: FaCode, color: '#00ff41' }
-  ];
+  const desktopApps = isKaliUi
+    ? [
+        { id: 'email', name: 'Email', icon: kaliIcon('email'), color: 'rgba(140, 205, 255, 0.82)' },
+        { id: 'terminal', name: 'Terminal', icon: kaliIcon('terminal'), color: 'rgba(64, 255, 170, 0.78)' },
+        { id: 'explorer', name: 'File Explorer', icon: kaliIcon('explorer'), color: 'rgba(110, 175, 255, 0.8)' },
+        { id: 'browser', name: 'Browser', icon: kaliIcon('browser'), color: 'rgba(255, 150, 95, 0.82)' },
+        { id: 'settings', name: 'Settings', icon: kaliIcon('settings'), color: 'rgba(200, 215, 240, 0.75)' },
+        { id: 'cloud', name: 'Cloud', icon: kaliIcon('cloud'), color: 'rgba(100, 240, 255, 0.8)' },
+        { id: 'screenshot', name: 'Screenshot', icon: kaliIcon('screenshot'), color: 'rgba(255, 230, 140, 0.82)' }
+      ]
+    : [
+        { id: 'explorer', name: 'File Explorer', icon: FaFolder, color: '#0078d4' },
+        { id: 'browser', name: 'Browser', icon: FaChrome, color: '#4285f4' },
+        { id: 'terminal', name: 'Terminal', icon: FaTerminal, color: '#00ff41' },
+        { id: 'settings', name: 'Settings', icon: FaCog, color: '#888' },
+        { id: 'notepad', name: 'Notepad', icon: FaFileAlt, color: '#ffff00' },
+        { id: 'calculator', name: 'Calculator', icon: FaCalculator, color: '#ff6600' },
+        { id: 'paint', name: 'Paint', icon: FaPaintBrush, color: '#ff00ff' },
+        { id: 'images', name: 'Pictures', icon: FaImage, color: '#00ffff' },
+        { id: 'music', name: 'Music', icon: FaMusic, color: '#ff0080' },
+        { id: 'videos', name: 'Videos', icon: FaVideo, color: '#8000ff' },
+        { id: 'games', name: 'Games', icon: FaGamepad, color: '#ff8000' },
+        { id: 'downloads', name: 'Downloads', icon: FaDownload, color: '#00d2d3' },
+        { id: 'email', name: 'Email', icon: FaEnvelope, color: '#00a8ff' },
+        { id: 'calendar', name: 'Calendar', icon: FaCalendar, color: '#ff4757' },
+        { id: 'clock', name: 'Clock', icon: FaClock, color: '#5f27cd' },
+        { id: 'camera', name: 'Camera', icon: FaCamera, color: '#00d2d3' },
+        { id: 'headphones', name: 'Audio', icon: FaHeadphones, color: '#ff6348' },
+        { id: 'book', name: 'Books', icon: FaBook, color: '#ff9ff3' },
+        { id: 'chart', name: 'Analytics', icon: FaChartLine, color: '#54a0ff' },
+        { id: 'cloud', name: 'Cloud', icon: FaCloud, color: '#48dbfb' },
+        { id: 'key', name: 'Password', icon: FaKey, color: '#ffd32a' },
+        { id: 'code', name: 'Code Editor', icon: FaCode, color: '#00ff41' }
+      ];
 
-  const startMenuApps = [
-    { id: 'calendar', name: 'Calendar', icon: FaCalendar, color: '#ff4757' },
-    { id: 'reminder', name: 'Reminder', icon: FaBell, color: '#ffa502' },
-    { id: 'meeting', name: 'Meeting', icon: FaUsersIcon, color: '#0078d4' }
-  ];
+  const startMenuApps = isKaliUi
+    ? [
+        { id: 'email', name: 'Email', icon: kaliIcon('email'), color: 'rgba(140, 205, 255, 0.82)' },
+        { id: 'terminal', name: 'Terminal', icon: kaliIcon('terminal'), color: 'rgba(64, 255, 170, 0.78)' },
+        { id: 'explorer', name: 'File Explorer', icon: kaliIcon('explorer'), color: 'rgba(110, 175, 255, 0.8)' },
+        { id: 'browser', name: 'Browser', icon: kaliIcon('browser'), color: 'rgba(255, 150, 95, 0.82)' },
+        { id: 'settings', name: 'Settings', icon: kaliIcon('settings'), color: 'rgba(200, 215, 240, 0.75)' },
+        { id: 'cloud', name: 'Cloud', icon: kaliIcon('cloud'), color: 'rgba(100, 240, 255, 0.8)' },
+        { id: 'screenshot', name: 'Screenshot', icon: kaliIcon('screenshot'), color: 'rgba(255, 230, 140, 0.82)' }
+      ]
+    : [
+        { id: 'calendar', name: 'Calendar', icon: FaCalendar, color: '#ff4757' },
+        { id: 'reminder', name: 'Reminder', icon: FaBell, color: '#ffa502' },
+        { id: 'meeting', name: 'Meeting', icon: FaUsersIcon, color: '#0078d4' }
+      ];
+
+  const launcherLabel = isKaliUi ? 'Apps' : 'Start';
+  const launcherTitle = isKaliUi ? 'Kali workspace' : 'Applications';
+  const launcherIcon = isKaliUi ? FaTerminal : FaWindows;
+  const LauncherIcon = launcherIcon;
 
   const handlePowerToggle = () => {
     dispatch({
@@ -1031,103 +2065,108 @@ const LaptopInterface = ({ device }) => {
   const handleTerminalCommand = (command) => {
     if (!command.trim()) return;
     const cmd = command.trim();
-    setTerminalHistory(prev => [...prev, { type: 'command', text: `kali@hacker-laptop:~$ ${cmd}` }]);
-    
+    const parts = cmd.split(/\s+/).filter(Boolean);
+    const cmdLower = cmd.toLowerCase();
+    const promptText = `${formatTerminalPrompt(simulatedCwdRef.current)} ${cmd}`;
+    setTerminalHistory((prev) => [...prev, { type: 'command', text: promptText }]);
+
     setTimeout(() => {
+      if (cmdLower === 'clear') {
+        setTerminalHistory([]);
+        return;
+      }
+
+      const vfs = applyLinuxVfsCommand(
+        cmd,
+        parts,
+        simulatedFsRef.current,
+        simulatedCwdRef.current,
+        simulatedFileContentsRef.current
+      );
+      if (vfs.handled) {
+        setSimulatedFs(vfs.fs);
+        setSimulatedCwd(vfs.cwd);
+        setSimulatedFileContents(vfs.files);
+        if (vfs.output) {
+          setTerminalHistory((prev) => [...prev, { type: 'output', text: vfs.output }]);
+        }
+        return;
+      }
+
       let output = '';
-      const cmdLower = cmd.toLowerCase();
       const cmdParts = cmd.split(' ');
       
       // Basic commands
       switch (cmdLower) {
         case 'help':
-          output = 'Available commands:\n' +
-            '\n' +
-            'Basic Commands:\n' +
-            '  help, whoami, pwd, ls, ls -la, cd, cat, clear, exit, status\n' +
-            '\n' +
-            'MitM Mission Commands:\n' +
-            '  sudo apt update && sudo apt install aircrack-ng hostapd dnsmasq iptables\n' +
-            '  iw list | grep "AP"\n' +
-            '  sudo iwlist wlan0 scan | grep -E "SSID|BSSID|Channel"\n' +
-            '  view captured (or analyze captured) - View captured network traffic analysis\n' +
-            '  sudo airmon-ng check kill\n' +
-            '  sudo airmon-ng start wlan0\n' +
-            '  sudo aireplay-ng -0 30 -a <BSSID> mon0\n' +
-            '  sudo hostapd /etc/hostapd/hostapd.conf\n' +
-            '  sudo ifconfig wlan0 up 192.168.1.1 netmask 255.255.255.0\n' +
-            '  sudo dnsmasq -C /etc/dnsmasq.conf -d\n' +
-            '  sudo sysctl -w net.ipv4.ip_forward=1\n' +
-            '  sudo iptables -t nat -A POSTROUTING -o eth0 -j MASQUERADE\n' +
-            '  sudo bettercap -iface wlan0\n' +
-            '  set arp.spoof.targets 192.168.1.0/24\n' +
-            '  arp.spoof on\n' +
-            '  net.sniff on\n' +
-            '  sudo tcpdump -i wlan0 -w capture.pcap\n' +
-            '  wireshark capture.pcap\n' +
-            '\n' +
-            'Network Tools:\n' +
-            '  ifconfig, ping, netstat, nmap, msfconsole\n' +
-            '\n' +
-            'Type any command to execute it!';
+          output = missionId === 1
+            ? 'Mission 1 — two phases (authorized pentest only)\n' +
+              '\n' +
+              'Story: Your team router is dead or unstable. You must use public WiFi (CafeFreeNet) to\n' +
+              'reach simulated targets. Public WiFi is a mutual hunting ground — harden first.\n' +
+              '\n' +
+              'Phase 1 — Protect yourself on CafeFreeNet (complete checklist; order flexible):\n' +
+              '  nmcli dev wifi connect CafeFreeNet\n' +
+              '  sudo apt install openvpn\n' +
+              '  openvpn --config your_vpn.ovpn --daemon\n' +
+              '  sudo ufw enable\n' +
+              '  sudo ufw default deny incoming\n' +
+              '  sudo ufw allow out 1194/udp\n' +
+              '  sudo iptables -A OUTPUT -p udp --dport 53 -j ACCEPT\n' +
+              '  sudo iptables -A OUTPUT -j DROP\n' +
+              '  sudo sysctl net.ipv4.ip_forward=0\n' +
+              '  sudo apt install unbound\n' +
+              '  sudo systemctl restart unbound\n' +
+              '  sudo macchanger -r wlan0\n' +
+              '  protonvpn-cli ks   OR   history > protected.log\n' +
+              '  Verify: curl ipinfo.io/ip   ps aux | grep openvpn\n' +
+              '\n' +
+              'Phase 2 — After Phase 1 (attack / become the MITM):\n' +
+              '  sudo apt update && sudo apt install aircrack-ng hostapd dnsmasq iptables\n' +
+              '  sudo airmon-ng check kill && sudo airmon-ng start wlan0\n' +
+              '  sudo hostapd /etc/hostapd/hostapd.conf\n' +
+              '  sudo sysctl -w net.ipv4.ip_forward=1\n' +
+              '  sudo bettercap -iface wlan0\n' +
+              '  arp.spoof on && net.sniff on\n' +
+              '  view captured\n' +
+              '\n' +
+              'Also: mission status — checklist. Basic: whoami, ping, ifconfig, clear.\n'
+            : 'Available commands:\n' +
+              '\n' +
+              'Simulated Linux / files:\n' +
+              '  pwd, cd, ls, ls -la, mkdir, touch, rm, rm -r, rmdir, mv, cp, cat, echo, uname, hostname\n' +
+              '  File Explorer updates automatically from the same filesystem.\n' +
+              '\n' +
+              'Basic Commands:\n' +
+              '  help, whoami, clear, exit, status\n' +
+              '\n' +
+              'MitM Mission Commands:\n' +
+              '  sudo apt update && sudo apt install aircrack-ng hostapd dnsmasq iptables\n' +
+              '  iw list | grep "AP"\n' +
+              '  sudo iwlist wlan0 scan | grep -E "SSID|BSSID|Channel"\n' +
+              '  view captured (or analyze captured) - View captured network traffic analysis\n' +
+              '  sudo airmon-ng check kill\n' +
+              '  sudo airmon-ng start wlan0\n' +
+              '  sudo aireplay-ng -0 30 -a <BSSID> mon0\n' +
+              '  sudo hostapd /etc/hostapd/hostapd.conf\n' +
+              '  sudo ifconfig wlan0 up 192.168.1.1 netmask 255.255.255.0\n' +
+              '  sudo dnsmasq -C /etc/dnsmasq.conf -d\n' +
+              '  sudo sysctl -w net.ipv4.ip_forward=1\n' +
+              '  sudo iptables -t nat -A POSTROUTING -o eth0 -j MASQUERADE\n' +
+              '  sudo bettercap -iface wlan0\n' +
+              '  set arp.spoof.targets 192.168.1.0/24\n' +
+              '  arp.spoof on\n' +
+              '  net.sniff on\n' +
+              '  sudo tcpdump -i wlan0 -w capture.pcap\n' +
+              '  wireshark capture.pcap\n' +
+              '\n' +
+              'Network Tools:\n' +
+              '  ifconfig, ping, netstat, nmap, msfconsole\n' +
+              '\n' +
+              'Type any command to execute it!';
           break;
         case 'whoami':
           output = 'kali';
-          break;
-        case 'pwd':
-          output = '/home/kali';
-          break;
-        case 'ls':
-          if (cmdParts.length > 1 && cmdParts[1] === '-la') {
-            output = 'total 48\n' +
-              'drwxr-xr-x  8 kali kali  4096 Jan 15 07:30 .\n' +
-              'drwxr-xr-x  3 root root  4096 Jan 10 10:00 ..\n' +
-              '-rw-r--r--  1 kali kali   220 Jan 10 10:00 .bashrc\n' +
-              'drwxr-xr-x  2 kali kali  4096 Jan 15 07:25 Desktop\n' +
-              'drwxr-xr-x  2 kali kali  4096 Jan 15 07:25 Documents\n' +
-              'drwxr-xr-x  2 kali kali  4096 Jan 15 07:25 Downloads\n' +
-              'drwxr-xr-x  2 kali kali  4096 Jan 15 07:25 Music\n' +
-              'drwxr-xr-x  2 kali kali  4096 Jan 15 07:25 Pictures\n' +
-              'drwxr-xr-x  2 kali kali  4096 Jan 15 07:25 Videos\n' +
-              'drwxr-xr-x  2 kali kali  4096 Jan 15 07:25 tools\n' +
-              'drwxr-xr-x  2 kali kali  4096 Jan 15 07:25 scripts\n' +
-              'drwxr-xr-x  2 kali kali  4096 Jan 15 07:25 mitm-tools';
-          } else {
-            output = 'Desktop  Documents  Downloads  Music  Pictures  Videos  tools  scripts  mitm-tools';
-          }
-          break;
-        case 'clear':
-          setTerminalHistory([]);
-          return;
-        case 'cd':
-          if (cmdParts.length > 1) {
-            output = `Changed directory to ${cmdParts[1]}`;
-          } else {
-            output = 'cd: missing operand';
-          }
-          break;
-        case 'cat':
-          if (cmdParts.length > 1) {
-            if (cmdParts[1].includes('hostapd.conf')) {
-              output = 'interface=wlan0\n' +
-                'driver=nl80211\n' +
-                'ssid=PublicWiFi\n' +
-                'hw_mode=g\n' +
-                'channel=11\n' +
-                'macaddr_acl=0\n' +
-                'auth_algs=1\n' +
-                'ignore_broadcast_ssid=0';
-            } else if (cmdParts[1].includes('dnsmasq.conf')) {
-              output = 'interface=wlan0\n' +
-                'dhcp-range=192.168.1.2,192.168.1.100,12h\n' +
-                'dhcp-option=3,192.168.1.1\n' +
-                'dhcp-option=6,192.168.1.1';
-            } else {
-              output = `cat: ${cmdParts[1]}: No such file or directory`;
-            }
-          } else {
-            output = 'cat: missing file operand';
-          }
           break;
         case 'exit':
           if (mitmState.bettercapRunning) {
@@ -1146,21 +2185,62 @@ const LaptopInterface = ({ device }) => {
           }
           break;
         case 'status':
-          output = '=== MitM Mission Status ===\n' +
-            `Tools Installed: ${mitmState.toolsInstalled ? '✓' : '✗'}\n` +
-            `Monitor Mode: ${mitmState.monitorMode ? '✓' : '✗'}\n` +
-            `Rogue AP Running: ${mitmState.rogueAPRunning ? '✓' : '✗'}\n` +
-            `DHCP Server: ${mitmState.dnsmasqRunning ? '✓' : '✗'}\n` +
-            `IP Forwarding: ${mitmState.ipForwarding ? '✓' : '✗'}\n` +
-            `Bettercap Running: ${mitmState.bettercapRunning ? '✓' : '✗'}\n` +
-            `ARP Spoofing: ${mitmState.arpSpoofing ? '✓' : '✗'}\n` +
-            `Network Sniffing: ${mitmState.sniffing ? '✓' : '✗'}\n` +
-            `Captured Packets: ${mitmState.capturedPackets}\n` +
-            `Connected Devices: ${mitmState.connectedDevices.length}`;
+          output = missionId === 1
+            ? formatMission1Status(mitmState)
+            : '=== MitM Mission Status ===\n' +
+              `Tools Installed: ${mitmState.toolsInstalled ? '✓' : '✗'}\n` +
+              `Monitor Mode: ${mitmState.monitorMode ? '✓' : '✗'}\n` +
+              `Rogue AP Running: ${mitmState.rogueAPRunning ? '✓' : '✗'}\n` +
+              `DHCP Server: ${mitmState.dnsmasqRunning ? '✓' : '✗'}\n` +
+              `IP Forwarding: ${mitmState.ipForwarding ? '✓' : '✗'}\n` +
+              `Bettercap Running: ${mitmState.bettercapRunning ? '✓' : '✗'}\n` +
+              `ARP Spoofing: ${mitmState.arpSpoofing ? '✓' : '✗'}\n` +
+              `Network Sniffing: ${mitmState.sniffing ? '✓' : '✗'}\n` +
+              `Captured Packets: ${mitmState.capturedPackets}\n` +
+              `Connected Devices: ${mitmState.connectedDevices.length}`;
           break;
-        default:
-          // MitM Mission Commands
-          if (cmd.startsWith('sudo apt update')) {
+        case 'mission':
+        case 'mission status':
+          output =
+            missionId === 1
+              ? formatMission1Status(mitmState)
+              : 'No mission in context. From the Missions page, open Mission 1 (laptop).';
+          break;
+        default: {
+          const ph1Out =
+            missionId === 1
+              ? handleMission1Phase1Command(
+                  cmd,
+                  setMitmState,
+                  mitmStateRef.current.mission1Phase1 || INITIAL_MISSION1_PHASE1
+                )
+              : null;
+          const phase1Snap = mitmStateRef.current.mission1Phase1 || INITIAL_MISSION1_PHASE1;
+          const phase1Done = isMission1Phase1Complete(phase1Snap);
+
+          // Mission config files (cat outside simulated $HOME files)
+          if (ph1Out !== null) {
+            output = ph1Out;
+          } else if (missionId === 1 && !phase1Done && isMission1AttackCommand(cmd)) {
+            output =
+              '[Mission 1] Phase 2 is locked until Phase 1 (harden on CafeFreeNet) is complete.\n' +
+              'Run VPN, firewall, iptables OUTPUT rules, sysctl ip_forward=0, unbound, macchanger, audit.\n' +
+              'Checklist: status   or   mission status';
+          } else if (cmd.startsWith('cat ') && cmdParts[1]?.includes('hostapd.conf')) {
+            output = 'interface=wlan0\n' +
+              'driver=nl80211\n' +
+              'ssid=PublicWiFi\n' +
+              'hw_mode=g\n' +
+              'channel=11\n' +
+              'macaddr_acl=0\n' +
+              'auth_algs=1\n' +
+              'ignore_broadcast_ssid=0';
+          } else if (cmd.startsWith('cat ') && cmdParts[1]?.includes('dnsmasq.conf')) {
+            output = 'interface=wlan0\n' +
+              'dhcp-range=192.168.1.2,192.168.1.100,12h\n' +
+              'dhcp-option=3,192.168.1.1\n' +
+              'dhcp-option=6,192.168.1.1';
+          } else if (cmd.startsWith('sudo apt update')) {
             output = 'Get:1 http://kali.download/kali kali-rolling InRelease [30.5 kB]\n' +
               'Get:2 http://kali.download/kali kali-rolling/main amd64 Packages [18.2 MB]\n' +
               'Fetched 18.2 MB in 3s (6,073 kB/s)\n' +
@@ -1168,18 +2248,23 @@ const LaptopInterface = ({ device }) => {
               'Building dependency tree... Done\n' +
               'Reading state information... Done\n' +
               'All packages are up to date.';
-            setMitmState(prev => ({ ...prev, toolsInstalled: true }));
           } else if (cmd.startsWith('sudo apt install')) {
-            const packages = cmd.replace('sudo apt install', '').trim();
+            const packages = cmd.replace(/^sudo\s+apt\s+install\s+/i, '').trim();
+            const attackPkgs = /aircrack|hostapd|dnsmasq|bettercap|wireshark|ettercap|iptables\b/i;
+            const setTools = attackPkgs.test(packages);
+            const pkgCount = packages.split(/\s+/).filter(Boolean).length || 1;
+            const firstPkg = packages.split(/\s+/).filter(Boolean)[0] || 'package';
             output = `Reading package lists... Done\n` +
               `Building dependency tree... Done\n` +
               `The following NEW packages will be installed:\n` +
               `  ${packages}\n` +
-              `0 upgraded, ${packages.split(' ').length} newly installed, 0 to remove\n` +
-              `Setting up ${packages.split(' ')[0]} ...\n` +
+              `0 upgraded, ${pkgCount} newly installed, 0 to remove\n` +
+              `Setting up ${firstPkg} ...\n` +
               `Processing triggers for systemd ...\n` +
               `Done!`;
-            setMitmState(prev => ({ ...prev, toolsInstalled: true }));
+            if (setTools) {
+              setMitmState(prev => ({ ...prev, toolsInstalled: true }));
+            }
           } else if (cmd.startsWith('iw list') || cmd.startsWith('iwlist')) {
             if (cmd.includes('grep "AP"')) {
               output = '        Supported interface modes:\n' +
@@ -1192,7 +2277,15 @@ const LaptopInterface = ({ device }) => {
                 '        AP mode: Supported ✓';
             } else if (cmd.includes('scan')) {
               output = 'wlan0     Scan completed :\n' +
-                '          Cell 01 - Address: AA:BB:CC:DD:EE:FF\n' +
+                '          Cell 01 - Address: DE:CA:FE:00:11:22\n' +
+                '                    ESSID:"CafeFreeNet"\n' +
+                '                    Protocol:IEEE 802.11ac\n' +
+                '                    Mode:Master\n' +
+                '                    Frequency:5.180 GHz (Channel 36)\n' +
+                '                    Encryption key:on\n' +
+                '                    Bit Rates:433 Mb/s\n' +
+                '                    Signal level=-38 dBm\n' +
+                '          Cell 02 - Address: AA:BB:CC:DD:EE:FF\n' +
                 '                    ESSID:"PublicWiFi"\n' +
                 '                    Protocol:IEEE 802.11bgn\n' +
                 '                    Mode:Master\n' +
@@ -1200,7 +2293,7 @@ const LaptopInterface = ({ device }) => {
                 '                    Encryption key:off\n' +
                 '                    Bit Rates:54 Mb/s\n' +
                 '                    Signal level=-45 dBm\n' +
-                '          Cell 02 - Address: 11:22:33:44:55:66\n' +
+                '          Cell 03 - Address: 11:22:33:44:55:66\n' +
                 '                    ESSID:"CoffeeShop_WiFi"\n' +
                 '                    Protocol:IEEE 802.11ac\n' +
                 '                    Mode:Master\n' +
@@ -1425,6 +2518,7 @@ const LaptopInterface = ({ device }) => {
             output = `Command not found: ${cmdParts[0]}\n` +
               `Type 'help' for a list of available commands.`;
           }
+        }
       }
       
       if (output) {
@@ -1540,9 +2634,78 @@ const LaptopInterface = ({ device }) => {
 
   const renderWindowContent = (app) => {
     switch (app.id) {
-      case 'explorer':
+      case 'explorer': {
+        if (isKaliUi) {
+          const node = simulatedFs[simulatedCwd] || { dirs: [], files: [] };
+          const dirs = [...node.dirs].sort();
+          const filesList = [...node.files].sort();
+          const canUp = simulatedCwd !== '/';
+          const parentPath = dirnamePath(simulatedCwd) || '/';
+          return (
+            <WindowContent $kali={isKaliUi}>
+              <h3>Files</h3>
+              <p style={{ fontSize: '12px', color: 'rgba(220, 233, 255, 0.75)', fontFamily: 'Share Tech Mono, monospace', wordBreak: 'break-all' }}>
+                {simulatedCwd}
+              </p>
+              <p style={{ fontSize: '11px', color: 'rgba(143, 172, 210, 0.85)', marginBottom: '10px' }}>
+                Synced with the terminal (pwd, cd, mkdir, touch, rm…).
+              </p>
+              {canUp && (
+                <button
+                  type="button"
+                  onClick={() => setSimulatedCwd(parentPath || '/')}
+                  style={{
+                    marginBottom: '10px',
+                    padding: '6px 12px',
+                    borderRadius: '6px',
+                    border: '1px solid rgba(124, 158, 205, 0.4)',
+                    background: 'rgba(22, 35, 55, 0.6)',
+                    color: '#dce9ff',
+                    cursor: 'pointer',
+                    fontSize: '12px'
+                  }}
+                >
+                  ↑ Parent directory
+                </button>
+              )}
+              <ul style={{ listStyle: 'none', padding: 0, margin: 0 }}>
+                {dirs.map((d) => (
+                  <li
+                    key={`d-${d}`}
+                    role="presentation"
+                    onClick={() => setSimulatedCwd(resolveLinuxPath(simulatedCwd, d))}
+                    style={{
+                      padding: '8px 10px',
+                      cursor: 'pointer',
+                      borderRadius: '6px',
+                      marginBottom: '4px',
+                      background: 'rgba(18, 30, 48, 0.45)'
+                    }}
+                  >
+                    📁 {d}
+                  </li>
+                ))}
+                {filesList.map((f) => (
+                  <li
+                    key={`f-${f}`}
+                    style={{
+                      padding: '8px 10px',
+                      marginBottom: '4px',
+                      color: 'rgba(220, 233, 255, 0.9)'
+                    }}
+                  >
+                    📄 {f}
+                  </li>
+                ))}
+              </ul>
+              {!dirs.length && !filesList.length && (
+                <p style={{ fontSize: '12px', color: 'rgba(143, 172, 210, 0.8)' }}>(empty directory)</p>
+              )}
+            </WindowContent>
+          );
+        }
         return (
-          <WindowContent>
+          <WindowContent $kali={isKaliUi}>
             <h3>File Explorer</h3>
             <p>This PC</p>
             <ul style={{ listStyle: 'none', padding: 0 }}>
@@ -1554,12 +2717,25 @@ const LaptopInterface = ({ device }) => {
             </ul>
           </WindowContent>
         );
+      }
       case 'browser':
         return (
-          <WindowContent>
-            <h3>Browser</h3>
-            <p>Welcome to the web browser</p>
-            <input type="text" placeholder="Enter URL..." style={{ width: '100%', padding: '8px', marginTop: '10px' }} />
+          <WindowContent $kali={isKaliUi}>
+            <h3>{isKaliUi ? 'Firefox ESR' : 'Browser'}</h3>
+            <p>{isKaliUi ? 'Web browser (simulation)' : 'Welcome to the web browser'}</p>
+            <input
+              type="text"
+              placeholder={isKaliUi ? 'Search or enter address…' : 'Enter URL...'}
+              style={{
+                width: '100%',
+                padding: '8px',
+                marginTop: '10px',
+                background: isKaliUi ? '#0d1420' : '#fff',
+                border: isKaliUi ? '1px solid rgba(124, 158, 205, 0.35)' : '1px solid #ccc',
+                color: isKaliUi ? '#dce9ff' : 'inherit',
+                borderRadius: '4px'
+              }}
+            />
           </WindowContent>
         );
       case 'terminal':
@@ -1593,7 +2769,7 @@ const LaptopInterface = ({ device }) => {
               ))}
             </div>
             <div style={{ display: 'flex', alignItems: 'center', gap: '5px' }}>
-              <span style={{ color: '#00ff41' }}>kali@hacker-laptop:~$</span>
+              <span style={{ color: '#00ff41' }}>{formatTerminalPrompt(simulatedCwd)}</span>
               <input
                 type="text"
                 value={terminalCommand}
@@ -1618,31 +2794,31 @@ const LaptopInterface = ({ device }) => {
         );
       case 'settings':
         return (
-          <WindowContent>
+          <WindowContent $kali={isKaliUi}>
             <div style={{ display: 'flex', gap: '20px', height: '100%' }}>
-              <div style={{ width: '200px', borderRight: '1px solid #ddd', paddingRight: '10px' }}>
+              <div style={{ width: '200px', borderRight: `1px solid ${isKaliUi ? '#243449' : '#ddd'}`, paddingRight: '10px' }}>
                 <h3>Settings</h3>
                 <ul style={{ listStyle: 'none', padding: 0 }}>
                   <li 
-                    style={{ padding: '10px', cursor: 'pointer', background: settingsCategory === 'display' ? '#e0e0e0' : 'transparent' }}
+                    style={{ padding: '10px', cursor: 'pointer', background: settingsCategory === 'display' ? (isKaliUi ? '#1a2638' : '#e0e0e0') : 'transparent' }}
                     onClick={() => setSettingsCategory('display')}
                   >
                     Display
                   </li>
                   <li 
-                    style={{ padding: '10px', cursor: 'pointer', background: settingsCategory === 'sound' ? '#e0e0e0' : 'transparent' }}
+                    style={{ padding: '10px', cursor: 'pointer', background: settingsCategory === 'sound' ? (isKaliUi ? '#1a2638' : '#e0e0e0') : 'transparent' }}
                     onClick={() => setSettingsCategory('sound')}
                   >
                     Sound
                   </li>
                   <li 
-                    style={{ padding: '10px', cursor: 'pointer', background: settingsCategory === 'network' ? '#e0e0e0' : 'transparent' }}
+                    style={{ padding: '10px', cursor: 'pointer', background: settingsCategory === 'network' ? (isKaliUi ? '#1a2638' : '#e0e0e0') : 'transparent' }}
                     onClick={() => setSettingsCategory('network')}
                   >
                     Network
                   </li>
                   <li 
-                    style={{ padding: '10px', cursor: 'pointer', background: settingsCategory === 'privacy' ? '#e0e0e0' : 'transparent' }}
+                    style={{ padding: '10px', cursor: 'pointer', background: settingsCategory === 'privacy' ? (isKaliUi ? '#1a2638' : '#e0e0e0') : 'transparent' }}
                     onClick={() => setSettingsCategory('privacy')}
                   >
                     Privacy
@@ -1680,7 +2856,7 @@ const LaptopInterface = ({ device }) => {
                 )}
                 {!settingsCategory && (
                   <div>
-                    <h4>System Settings</h4>
+                    <h4>{isKaliUi ? 'Kali Control Center' : 'System Settings'}</h4>
                     <p>Select a category from the left to configure settings.</p>
                   </div>
                 )}
@@ -1812,11 +2988,11 @@ const LaptopInterface = ({ device }) => {
         );
       case 'notepad':
         return (
-          <WindowContent style={{ padding: '10px', height: '100%' }}>
+          <WindowContent $kali={isKaliUi} style={{ padding: '10px', height: '100%' }}>
             <textarea
               value={notepadText}
               onChange={(e) => setNotepadText(e.target.value)}
-              placeholder="Start typing..."
+              placeholder={isKaliUi ? 'Capture notes, commands, and findings...' : 'Start typing...'}
               style={{
                 width: '100%',
                 height: '100%',
@@ -1825,7 +3001,8 @@ const LaptopInterface = ({ device }) => {
                 fontFamily: 'monospace',
                 fontSize: '14px',
                 padding: '10px',
-                background: '#fff',
+                background: isKaliUi ? '#0d1420' : '#fff',
+                color: isKaliUi ? '#d7e4f8' : '#111',
                 resize: 'none'
               }}
             />
@@ -1833,7 +3010,7 @@ const LaptopInterface = ({ device }) => {
         );
       case 'downloads':
         return (
-          <WindowContent style={{ padding: '20px' }}>
+          <WindowContent $kali={isKaliUi} style={{ padding: '20px' }}>
             <h3>Downloads</h3>
             <div style={{ marginTop: '15px' }}>
               <div style={{ 
@@ -1858,15 +3035,15 @@ const LaptopInterface = ({ device }) => {
                       cursor: 'pointer',
                       textAlign: 'center',
                       transition: 'all 0.2s',
-                      background: '#fff'
+                      background: isKaliUi ? '#152131' : '#fff'
                     }}
                     onMouseEnter={(e) => {
-                      e.target.style.background = '#f0f0f0';
+                      e.target.style.background = isKaliUi ? '#1c2b40' : '#f0f0f0';
                       e.target.style.transform = 'translateY(-2px)';
                       e.target.style.boxShadow = '0 4px 8px rgba(0,0,0,0.1)';
                     }}
                     onMouseLeave={(e) => {
-                      e.target.style.background = '#fff';
+                      e.target.style.background = isKaliUi ? '#152131' : '#fff';
                       e.target.style.transform = 'translateY(0)';
                       e.target.style.boxShadow = 'none';
                     }}
@@ -1875,10 +3052,10 @@ const LaptopInterface = ({ device }) => {
                     <div style={{ fontSize: '12px', fontWeight: 'bold', marginBottom: '4px', wordBreak: 'break-word' }}>
                       {file.name}
                     </div>
-                    <div style={{ fontSize: '10px', color: '#666', marginBottom: '2px' }}>
+                    <div style={{ fontSize: '10px', color: isKaliUi ? '#9fb4d4' : '#666', marginBottom: '2px' }}>
                       {file.size}
                     </div>
-                    <div style={{ fontSize: '10px', color: '#999' }}>
+                    <div style={{ fontSize: '10px', color: isKaliUi ? '#7f93b4' : '#999' }}>
                       {file.date}
                     </div>
                   </div>
@@ -1889,16 +3066,107 @@ const LaptopInterface = ({ device }) => {
         );
       case 'email':
         return (
-          <WindowContent style={{ padding: '20px' }}>
-            <h3>Inbox</h3>
-            <div style={{ marginTop: '15px' }}>
-              <div style={{ padding: '10px', borderBottom: '1px solid #ddd', cursor: 'pointer' }}>
-                <strong>Welcome Email</strong>
-                <p style={{ margin: '5px 0', color: '#666' }}>Welcome to your new laptop!</p>
+          <WindowContent $kali={isKaliUi} style={{ padding: '20px' }}>
+            <h3>{isKaliUi ? 'Thunderbird (simulation)' : 'Inbox'}</h3>
+            <p style={{ fontSize: '12px', color: isKaliUi ? '#8ea6cb' : '#666', marginBottom: '12px' }}>
+              {isKaliUi ? 'Local mailbox · IMAP disabled (offline bundle)' : 'Your messages'}
+            </p>
+            <div style={{ marginTop: '8px' }}>
+              <div
+                style={{
+                  padding: '12px',
+                  borderBottom: `1px solid ${isKaliUi ? '#243449' : '#ddd'}`,
+                  cursor: 'pointer',
+                  borderRadius: '6px',
+                  background: isKaliUi ? 'rgba(18, 31, 51, 0.6)' : 'transparent'
+                }}
+              >
+                <strong>Welcome</strong>
+                <p style={{ margin: '6px 0 0', color: isKaliUi ? '#b8cbe8' : '#666', fontSize: '13px' }}>
+                  Welcome to your simulated inbox on this Kali workspace.
+                </p>
               </div>
             </div>
           </WindowContent>
         );
+      case 'cloud':
+        return (
+          <WindowContent $kali={isKaliUi} style={{ padding: '20px' }}>
+            <h3>{isKaliUi ? 'Nextcloud (simulation)' : 'Cloud'}</h3>
+            <p style={{ fontSize: '12px', color: isKaliUi ? '#8ea6cb' : '#666', marginBottom: '16px' }}>
+              {isKaliUi ? 'Synced folders (game simulation only — no real uploads).' : 'Cloud storage'}
+            </p>
+            <div
+              style={{
+                display: 'grid',
+                gridTemplateColumns: 'repeat(auto-fill, minmax(140px, 1fr))',
+                gap: '12px'
+              }}
+            >
+              {['Documents', 'Reports', 'Payloads', 'Captures'].map((folder) => (
+                <div
+                  key={folder}
+                  style={{
+                    padding: '14px',
+                    borderRadius: '8px',
+                    border: isKaliUi ? '1px solid rgba(124, 158, 205, 0.22)' : '1px solid #ddd',
+                    background: isKaliUi ? 'rgba(18, 31, 51, 0.75)' : '#f9f9f9',
+                    fontSize: '13px',
+                    textAlign: 'center'
+                  }}
+                >
+                  <FaFolder style={{ fontSize: '1.4rem', marginBottom: '8px', opacity: 0.9 }} />
+                  <div>{folder}</div>
+                  <div style={{ fontSize: '10px', color: isKaliUi ? '#7f93b4' : '#888', marginTop: '6px' }}>Synced</div>
+                </div>
+              ))}
+            </div>
+          </WindowContent>
+        );
+      case 'screenshot': {
+        const shotLabel = `Screenshot_${new Date().toISOString().slice(0, 10).replace(/-/g, '')}_${Date.now() % 100000}.png`;
+        return (
+          <WindowContent $kali={isKaliUi} style={{ padding: '20px' }}>
+            <h3>{isKaliUi ? 'Spectacle / scrot (simulation)' : 'Screenshot'}</h3>
+            <p style={{ fontSize: '12px', color: isKaliUi ? '#8ea6cb' : '#666', marginBottom: '14px' }}>
+              {isKaliUi ? 'Capture the fake desktop to ~/Pictures/Screenshots (simulated path only).' : 'Screen capture tool'}
+            </p>
+            <div
+              style={{
+                height: '140px',
+                borderRadius: '8px',
+                border: isKaliUi ? '2px dashed rgba(95, 168, 255, 0.45)' : '2px dashed #ccc',
+                display: 'flex',
+                alignItems: 'center',
+                justifyContent: 'center',
+                background: isKaliUi
+                  ? 'linear-gradient(135deg, rgba(22, 35, 55, 0.9) 0%, rgba(12, 20, 34, 0.95) 100%)'
+                  : '#f5f5f5',
+                color: isKaliUi ? '#b8cbe8' : '#666',
+                fontSize: '13px',
+                marginBottom: '14px'
+              }}
+            >
+              Preview area (simulated)
+            </div>
+            <button
+              type="button"
+              onClick={() => alert(isKaliUi ? `Saved (simulated): /home/kali/Pictures/Screenshots/${shotLabel}` : `Screenshot saved as ${shotLabel}`)}
+              style={{
+                padding: '10px 16px',
+                borderRadius: '6px',
+                border: 'none',
+                cursor: 'pointer',
+                fontWeight: 600,
+                background: isKaliUi ? 'linear-gradient(135deg, #5fa8ff 0%, #3d7ccc 100%)' : '#0078d4',
+                color: '#fff'
+              }}
+            >
+              Capture now
+            </button>
+          </WindowContent>
+        );
+      }
       case 'calendar':
         return (
           <WindowContent style={{ padding: '20px' }}>
@@ -2045,7 +3313,7 @@ const LaptopInterface = ({ device }) => {
         );
       default:
         return (
-          <WindowContent>
+          <WindowContent $kali={isKaliUi}>
             <h3>{app.name}</h3>
             <p>Application content for {app.name}</p>
           </WindowContent>
@@ -2058,19 +3326,81 @@ const LaptopInterface = ({ device }) => {
       <LaptopFrame>
         <ScreenBezel>
           <LaptopScreen>
-            <Desktop onClick={() => setShowStartMenu(false)}>
-              <DesktopIcons onClick={(e) => e.stopPropagation()}>
+            <Desktop $kali={isKaliUi} onClick={() => setShowStartMenu(false)}>
+              {isKaliUi && (
+                <DesktopHeader $kali>
+                  <DesktopHeaderTitle>Kali workspace</DesktopHeaderTitle>
+                  <DesktopHeaderMeta>
+                    Offensive toolkit VM · simulated network only
+                  </DesktopHeaderMeta>
+                </DesktopHeader>
+              )}
+              {missionId === 1 && isKaliUi && (
+                missionBannerCollapsed ? (
+                  <MissionBannerToggle
+                    type="button"
+                    onClick={(e) => {
+                      e.stopPropagation();
+                      setMissionBannerCollapsed(false);
+                    }}
+                    style={{ position: 'absolute', top: '58px', left: 16, zIndex: 4 }}
+                  >
+                    Show mission brief
+                  </MissionBannerToggle>
+                ) : (
+                  <MissionBanner
+                    $kali={isKaliUi}
+                    onClick={(e) => e.stopPropagation()}
+                  >
+                    <MissionBannerTitle>Mission 1 · MitM on public WiFi</MissionBannerTitle>
+                    <MissionBannerPhase>
+                      Authorized pentest: team router is down — join CafeFreeNet, then harden before you attack.
+                    </MissionBannerPhase>
+                    <MissionBannerPhase>
+                      Phase 1 — protect this machine (VPN, UFW, iptables OUTPUT, sysctl ip_forward=0, unbound, MAC,
+                      audit).
+                    </MissionBannerPhase>
+                    <MissionBannerPhase>
+                      Phase 2 — after checklist is green, run the MitM chain (bettercap → arp.spoof → net.sniff → view
+                      captured).
+                    </MissionBannerPhase>
+                    <MissionBannerPhase style={{ color: '#9fb4d4', marginTop: 10 }}>
+                      Progress:{' '}
+                      {Object.values(mitmState.mission1Phase1 || INITIAL_MISSION1_PHASE1).filter(Boolean).length}
+                      /12 Phase 1 steps
+                      {isMission1Phase1Complete(mitmState.mission1Phase1 || INITIAL_MISSION1_PHASE1)
+                        ? ' · Phase 2 unlocked'
+                        : ''}
+                    </MissionBannerPhase>
+                    <MissionBannerToggle
+                      type="button"
+                      onClick={(e) => {
+                        e.stopPropagation();
+                        setMissionBannerCollapsed(true);
+                      }}
+                    >
+                      Hide brief
+                    </MissionBannerToggle>
+                  </MissionBanner>
+                )
+              )}
+              <DesktopIcons $kali={isKaliUi} onClick={(e) => e.stopPropagation()}>
                 {desktopApps.map((app) => (
                   <DesktopIcon
                     key={app.id}
+                    $kali={isKaliUi}
                     onClick={() => openApp(app)}
-                    whileHover={{ scale: 1.1 }}
-                    whileTap={{ scale: 0.9 }}
+                    whileHover={{ scale: isKaliUi ? 1.02 : 1.05 }}
+                    whileTap={{ scale: 0.97 }}
                   >
-                    <IconImage style={{ background: app.color }}>
+                    <IconImage
+                      $kali={isKaliUi}
+                      $accent={isKaliUi ? app.color : undefined}
+                      style={!isKaliUi ? { background: app.color } : undefined}
+                    >
                       <app.icon />
                     </IconImage>
-                    <IconLabel>{app.name}</IconLabel>
+                    <IconLabel $kali={isKaliUi}>{app.name}</IconLabel>
                   </DesktopIcon>
                 ))}
               </DesktopIcons>
@@ -2081,6 +3411,7 @@ const LaptopInterface = ({ device }) => {
                   return (
                     <Window
                       key={window.id}
+                      $kali={isKaliUi}
                       initial={{ opacity: 0, scale: 0.9 }}
                       animate={{ 
                         opacity: state.minimized ? 0 : 1, 
@@ -2096,19 +3427,19 @@ const LaptopInterface = ({ device }) => {
                       $selected={selectedApp === window.id}
                       onClick={() => setSelectedApp(window.id)}
                     >
-                      <WindowHeader>
-                        <WindowTitle>
+                      <WindowHeader $kali={isKaliUi}>
+                        <WindowTitle $kali={isKaliUi}>
                           <window.icon />
                           {window.name}
                         </WindowTitle>
                         <WindowControls>
-                          <WindowButton onClick={(e) => { e.stopPropagation(); minimizeWindow(window.id); }}>
+                          <WindowButton $kali={isKaliUi} onClick={(e) => { e.stopPropagation(); minimizeWindow(window.id); }}>
                             <FaMinus />
                           </WindowButton>
-                          <WindowButton onClick={(e) => { e.stopPropagation(); maximizeWindow(window.id); }}>
+                          <WindowButton $kali={isKaliUi} onClick={(e) => { e.stopPropagation(); maximizeWindow(window.id); }}>
                             <FaSquare />
                           </WindowButton>
-                          <WindowButton onClick={(e) => { e.stopPropagation(); closeWindow(window.id); }}>
+                          <WindowButton $kali={isKaliUi} onClick={(e) => { e.stopPropagation(); closeWindow(window.id); }}>
                             <FaTimes />
                           </WindowButton>
                         </WindowControls>
@@ -2119,8 +3450,9 @@ const LaptopInterface = ({ device }) => {
                 })}
               </AnimatePresence>
 
-              <Taskbar>
+              <Taskbar $kali={isKaliUi}>
                 <StartButton 
+                  $kali={isKaliUi}
                   whileHover={{ scale: 1.05 }} 
                   whileTap={{ scale: 0.95 }}
                   onClick={(e) => {
@@ -2128,23 +3460,24 @@ const LaptopInterface = ({ device }) => {
                     setShowStartMenu(!showStartMenu);
                   }}
                 >
-                  <FaWindows />
-                  Start
+                  <LauncherIcon />
+                  {launcherLabel}
                 </StartButton>
                 
                 <AnimatePresence>
                   {showStartMenu && (
                     <StartMenu
-                      initial={{ opacity: 0, y: 20 }}
+                      $kali={isKaliUi}
+                      initial={{ opacity: 0, y: isKaliUi ? -12 : 20 }}
                       animate={{ opacity: 1, y: 0 }}
-                      exit={{ opacity: 0, y: 20 }}
+                      exit={{ opacity: 0, y: isKaliUi ? -12 : 20 }}
                       transition={{ duration: 0.2 }}
                       onClick={(e) => e.stopPropagation()}
                     >
-                      <StartMenuHeader>
-                        <StartMenuTitle>
-                          <FaWindows />
-                          Applications
+                      <StartMenuHeader $kali={isKaliUi}>
+                        <StartMenuTitle $kali={isKaliUi}>
+                          <LauncherIcon />
+                          {launcherTitle}
                         </StartMenuTitle>
                       </StartMenuHeader>
                       <StartMenuApps>
@@ -2174,6 +3507,8 @@ const LaptopInterface = ({ device }) => {
                   return (
                     <TaskbarIcon
                       key={window.id}
+                      $kali={isKaliUi}
+                      $active={selectedApp === window.id}
                       onClick={() => {
                         if (state.minimized) {
                           setWindowStates({ ...windowStates, [window.id]: { ...state, minimized: false } });
@@ -2182,8 +3517,12 @@ const LaptopInterface = ({ device }) => {
                       }}
                       whileHover={{ scale: 1.1 }}
                       style={{ 
-                        background: selectedApp === window.id ? 'rgba(255, 255, 255, 0.2)' : 'transparent',
-                        borderBottom: selectedApp === window.id ? '2px solid #fff' : 'none'
+                        background: selectedApp === window.id
+                          ? (isKaliUi ? 'rgba(104, 141, 199, 0.22)' : 'rgba(255, 255, 255, 0.2)')
+                          : 'transparent',
+                        borderBottom: selectedApp === window.id
+                          ? (isKaliUi ? '2px solid #5fa8ff' : '2px solid #fff')
+                          : 'none'
                       }}
                       title={window.name}
                     >
@@ -2191,7 +3530,7 @@ const LaptopInterface = ({ device }) => {
                     </TaskbarIcon>
                   );
                 })}
-                <SystemTray>
+                <SystemTray $kali={isKaliUi}>
                   <StatusItem active={isConnected}>
                     <StatusDot active={isConnected} />
                     {isConnected ? <FaWifi /> : <FaEthernet />}
@@ -2219,7 +3558,8 @@ const LaptopInterface = ({ device }) => {
             </Desktop>
           </LaptopScreen>
         </ScreenBezel>
-        <KeyboardArea>
+        {!hideKeyboard && (
+        <KeyboardArea $compactKeyboard={compactKeyboard}>
           {/* Row 1: Function Keys */}
           <KeyboardRow>
             <Key width="40px" height="30px">Esc</Key>
@@ -2360,6 +3700,7 @@ const LaptopInterface = ({ device }) => {
             <Key width="40px" height="30px">.</Key>
           </KeyboardRow>
         </KeyboardArea>
+        )}
       </LaptopFrame>
 
       {/* Captured Data Modal */}
@@ -2475,7 +3816,7 @@ const LaptopInterface = ({ device }) => {
                     </DataRow>
                     <DataRow>
                       <DataLabel>User Agent:</DataLabel>
-                      <DataValue>Mozilla/5.0 (Windows NT 10.0; Win64; x64)</DataValue>
+                      <DataValue>{isKaliUi ? 'Mozilla/5.0 (X11; Linux x86_64; rv:128.0) Gecko/20100101 Firefox/128.0' : 'Mozilla/5.0 (Windows NT 10.0; Win64; x64)'}</DataValue>
                     </DataRow>
                   </DataCard>
 

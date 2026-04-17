@@ -37,7 +37,6 @@ import {
   FaUser
 } from 'react-icons/fa';
 import NmapInterface from './tools/NmapInterface';
-import PhishingKitInterface from './tools/PhishingKitInterface';
 import WiresharkInterface from './tools/WiresharkInterface';
 import MetasploitInterface from './tools/MetasploitInterface';
 import WhoisInterface from './tools/WhoisInterface';
@@ -543,7 +542,6 @@ const Environment = ({ user }) => {
       { id: 'john', name: 'John the Ripper', description: 'Password cracker', icon: FaUnlock, cost: 0 }
     ],
     social: [
-      { id: 'phishing', name: 'Phishing Kit', description: 'Create fake emails', icon: FaUserSecret, cost: 0 },
       { id: 'social_eng', name: 'Social Engineering', description: 'Manipulation tools', icon: FaUserSecret, cost: 0 },
       { id: 'osint', name: 'OSINT', description: 'Open source intel', icon: FaSearch, cost: 0 },
       { id: 'recon', name: 'Recon-ng', description: 'Reconnaissance', icon: FaEye, cost: 0 }
@@ -697,8 +695,6 @@ const Environment = ({ user }) => {
         return <BurpSuiteInterface tool={selectedTool} targets={targets} onClose={() => setShowAttackModal(false)} />;
       case 'john':
         return <JohnInterface tool={selectedTool} onClose={() => setShowAttackModal(false)} />;
-      case 'phishing':
-        return <PhishingKitInterface tool={selectedTool} targets={targets} onClose={() => setShowAttackModal(false)} />;
       case 'social_eng':
         return <SocialEngInterface tool={selectedTool} targets={targets} onClose={() => setShowAttackModal(false)} />;
       case 'osint':
